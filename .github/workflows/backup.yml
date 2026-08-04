@@ -1,0 +1,33 @@
+name: Backup nocturno de la base de datos
+
+# Capa extra de respaldo, independiente de los backups automáticos de
+# Supabase (que en el plan Free solo guardan 7 días). Corre todas las
+# noches, hace un dump completo con pg_dump y lo guarda como artefacto
+# del repo por 30 días. No reemplaza subir a un plan con PITR — es una
+# segunda copia por si algo le pasa a la cuenta de Supabase misma.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 03:00 hora Colombia (UTC-5) todos los días
+  workflow_dispatch: {}     # también se puede correr manualmente desde GitHub
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalar cliente de PostgreSQL
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Dump de la base de datos
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          fecha=$(date +%Y-%m-%d)
+          pg_dump "$DATABASE_URL" --no-owner --no-privileges -f "backup_opera_${fecha}.sql"
+
+      - name: Subir el dump como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-opera-${{ github.run_id }}
+          path: backup_opera_*.sql
+          retention-days: 30
