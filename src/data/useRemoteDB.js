@@ -13,18 +13,19 @@ const fmtFechaHora = iso => {
  *  consumen los 11 módulos (misma forma que el localStorage del prototipo). */
 async function fetchAll(){
   const [
-    cfgRes, festivosRes, profilesRes, auditoriaRes,
+    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes,
     ...tablaRes
   ] = await Promise.all([
     supabase.from('configuracion').select('*').eq('id', 1).maybeSingle(),
     supabase.from('festivos').select('fecha').order('fecha'),
-    supabase.from('profiles').select('id,nombre,estado,roles(codigo,nombre)'),
+    supabase.from('profiles').select('id,nombre,email,estado,rol_id,roles(codigo,nombre)'),
     supabase.from('auditoria').select('id,fecha,usuario_id,accion,entidad,entidad_id')
       .order('fecha', { ascending: false }).limit(200),
+    supabase.from('roles').select('id,codigo,nombre').order('id'),
     ...TABLAS_SYNCABLES.map(key => supabase.from(TABLAS[key].table).select('*'))
   ]);
 
-  for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, ...tablaRes]) {
+  for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, ...tablaRes]) {
     if (res.error) throw res.error;
   }
 
@@ -40,9 +41,12 @@ async function fetchAll(){
   (profilesRes.data || []).forEach(p => { perfilesPorId[p.id] = p; });
 
   db.usuarios = (profilesRes.data || []).map(p => ({
-    id: p.id, nombre: p.nombre, email: '', // el correo vive en auth.users, no accesible con la anon key
+    id: p.id, nombre: p.nombre, email: p.email || '',
+    rolId: p.rol_id, rolCodigo: p.roles?.codigo || '',
     rol: (p.roles?.codigo || '—').toUpperCase(), estado: p.estado
   }));
+
+  db.roles = (rolesRes.data || []).map(r => ({ id: r.id, codigo: r.codigo, nombre: r.nombre }));
 
   db.auditoria = (auditoriaRes.data || []).map(a => ({
     id: a.id, fecha: fmtFechaHora(a.fecha),
@@ -159,5 +163,5 @@ export function useRemoteDB(toast){
     });
   }, [recargar]);
 
-  return { db, set, loading };
+  return { db, set, loading, refrescar: recargar };
 }

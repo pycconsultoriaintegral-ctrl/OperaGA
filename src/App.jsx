@@ -69,7 +69,7 @@ function AppShell({ perfil, rol, has, onLogout }){
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();
-  const { db, set, loading: dbLoading } = useRemoteDB(toast);
+  const { db, set, loading: dbLoading, refrescar } = useRemoteDB(toast);
 
   useEffect(()=>{ document.documentElement.classList.toggle('dark',dark);
     try{localStorage.setItem('opera_dark',dark?'1':'0');}catch(e){} },[dark]);
@@ -101,7 +101,7 @@ function AppShell({ perfil, rol, has, onLogout }){
 
   if (dbLoading || !db) return <Pantalla msg="Cargando datos de la operación…"/>;
 
-  const P = { db, set, toast, go };
+  const P = { db, set, toast, go, refrescar };
   const VISTAS = {
     dashboard:   <Dashboard {...P}/>,
     empleados:   <Empleados {...P}/>,

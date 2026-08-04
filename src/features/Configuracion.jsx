@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react';
-import { Page, Card, Tabs, Field, Select, Table, Td, Badge, Avatar, Btn, Icon, IN, TONE } from '../components/ui.jsx';
+import { Page, Card, Tabs, Field, Select, Input, Modal, Table, Td, Badge, Avatar, Btn, Icon, IN, TONE } from '../components/ui.jsx';
 import { CONFIG_DEFAULT, BUCKETS } from '../lib/constants.js';
 import { factorBucket } from '../lib/payroll.js';
 import { fmtCOP, fmtFecha, nombreDia, pad } from '../lib/utils.js';
-import { KEY } from '../lib/seed.js';
+import { supabase } from '../lib/supabaseClient.js';
 
-export default function Configuracion({db, set, toast}){
+const ROL_TONE = { ADMINISTRADOR:'brand', GESTION_HUMANA:'emerald', SUPERVISOR:'violet', CONSULTA:'sky' };
+
+export default function Configuracion({db, set, toast, refrescar}){
   const [tab,setTab] = useState('jornada');
   const [cfg,setCfg] = useState(db.cfg);
   const [nuevoFest,setNuevoFest] = useState('');
@@ -13,8 +15,42 @@ export default function Configuracion({db, set, toast}){
 
   const aplicar = () => { set(d=>({...d,cfg})); toast('Parámetros actualizados'); };
   const restaurar = () => { setCfg(CONFIG_DEFAULT); set(d=>({...d,cfg:CONFIG_DEFAULT})); toast('Valores por defecto restaurados'); };
-  const resetTodo = () => { if(confirm('Esto borrará todos los datos y restaurará los de ejemplo. ¿Continuar?')){
-    localStorage.removeItem(KEY); location.reload(); } };
+
+  // ── Usuarios ──
+  const [editUser,setEditUser] = useState(null);
+  const [guardandoUser,setGuardandoUser] = useState(false);
+  const vacioUser = { email:'', password:'', nombre:'', rol_codigo: db.roles?.[0]?.codigo || '' };
+
+  const llamarAdmin = async (payload) => {
+    const { data, error } = await supabase.functions.invoke('admin-usuarios', { body: payload });
+    if (error) throw new Error(error.message || 'No se pudo completar la operación');
+    if (data?.error) throw new Error(data.error);
+    return data;
+  };
+
+  const crearUsuario = async () => {
+    if(!editUser.email.trim() || !editUser.nombre.trim() || !editUser.rol_codigo)
+      return toast('Correo, nombre y rol son obligatorios','rose');
+    if(editUser.password.length < 8) return toast('La contraseña debe tener al menos 8 caracteres','rose');
+    setGuardandoUser(true);
+    try{
+      await llamarAdmin({ action:'crear', ...editUser });
+      toast('Usuario creado'); setEditUser(null); await refrescar?.();
+    }catch(e){ toast(e.message,'rose'); }
+    setGuardandoUser(false);
+  };
+
+  const cambiarRolUsuario = async (u2, rol_codigo) => {
+    try{ await llamarAdmin({ action:'cambiar_rol', user_id:u2.id, rol_codigo }); toast('Rol actualizado'); await refrescar?.(); }
+    catch(e){ toast(e.message,'rose'); }
+  };
+
+  const cambiarEstadoUsuario = async (u2) => {
+    const estado = u2.estado==='ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+    try{ await llamarAdmin({ action:'cambiar_estado', user_id:u2.id, estado });
+      toast(estado==='ACTIVO'?'Usuario reactivado':'Usuario desactivado'); await refrescar?.(); }
+    catch(e){ toast(e.message,'rose'); }
+  };
 
   const P = ({label, k, hint, tipo='number', suf}) => (
     <Field label={label} hint={hint}>
@@ -236,34 +272,55 @@ export default function Configuracion({db, set, toast}){
 
     {tab==='usuarios' && <div className="grid lg:grid-cols-3 gap-4">
       <Card className="lg:col-span-2" pad={false}>
-        <div className="p-5 border-b border-ink-200 dark:border-ink-800">
-          <h3 className="font-bold text-ink-900 dark:text-white">Usuarios del sistema</h3>
-          <p className="text-xs text-ink-500">Control de acceso por rol</p></div>
-        <Table head={['Usuario','Correo','Rol','Estado']}>
-          {db.usuarios.map(u2 => <tr key={u2.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
+        <div className="p-5 border-b border-ink-200 dark:border-ink-800 flex items-center justify-between">
+          <div><h3 className="font-bold text-ink-900 dark:text-white">Usuarios del sistema</h3>
+            <p className="text-xs text-ink-500">Control de acceso por rol</p></div>
+          <Btn s="sm" icon="plus" onClick={()=>setEditUser(vacioUser)}>Nuevo usuario</Btn>
+        </div>
+        <Table head={['Usuario','Correo','Rol','Estado','']}>
+          {(db.usuarios||[]).map(u2 => <tr key={u2.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
             <Td><div className="flex items-center gap-2.5"><Avatar nombre={u2.nombre} size="w-8 h-8"/>
               <span className="font-bold">{u2.nombre}</span></div></Td>
-            <Td className="text-xs">{u2.email}</Td>
-            <Td><Badge tone={u2.rol==='ADMINISTRADOR'?'brand':u2.rol==='SUPERVISOR'?'violet':'sky'}>{u2.rol}</Badge></Td>
-            <Td><Badge tone="emerald" dot>{u2.estado}</Badge></Td>
+            <Td className="text-xs">{u2.email || '—'}</Td>
+            <Td className="w-44">
+              <Select value={u2.rolCodigo} onChange={e=>cambiarRolUsuario(u2, e.target.value)}
+                options={(db.roles||[]).map(r=>({v:r.codigo, l:r.nombre}))}/>
+            </Td>
+            <Td><Badge tone={u2.estado==='ACTIVO'?'emerald':'slate'} dot>{u2.estado}</Badge></Td>
+            <Td className="text-right">
+              <Btn v={u2.estado==='ACTIVO'?'outline':'soft'} s="sm" onClick={()=>cambiarEstadoUsuario(u2)}>
+                {u2.estado==='ACTIVO'?'Desactivar':'Reactivar'}</Btn>
+            </Td>
           </tr>)}
         </Table>
       </Card>
       <Card>
-        <h3 className="font-bold text-ink-900 dark:text-white mb-4">Matriz de permisos</h3>
+        <h3 className="font-bold text-ink-900 dark:text-white mb-4">Roles disponibles</h3>
         <div className="space-y-3">
-          {[['ADMINISTRADOR','brand',['Acceso total','Configurar parámetros','Gestionar usuarios','Aprobar novedades','Liquidar nómina']],
-            ['SUPERVISOR','violet',['Ver dashboard','Gestionar turnos','Registrar asistencia','Aprobar novedades','Ver reportes']],
-            ['NOMINA','sky',['Ver empleados','Liquidar nómina','Ver reportes','Exportar datos']]].map(([rol,tone,perms])=>
-            <div key={rol} className="p-3 rounded-xl ring-1 ring-inset ring-ink-200 dark:ring-ink-800">
-              <Badge tone={tone}>{rol}</Badge>
-              <ul className="mt-2.5 space-y-1">{perms.map(p=>
-                <li key={p} className="text-[11px] text-ink-600 dark:text-ink-300 flex items-center gap-1.5">
-                  <Icon n="check" c="w-3 h-3 text-emerald-500 shrink-0"/>{p}</li>)}</ul>
+          {(db.roles||[]).map(r =>
+            <div key={r.id} className="p-3 rounded-xl ring-1 ring-inset ring-ink-200 dark:ring-ink-800">
+              <Badge tone={ROL_TONE[r.codigo.toUpperCase()]||'slate'}>{r.nombre}</Badge>
+              <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-2">
+                Los permisos exactos (ver/crear/editar/eliminar/exportar por módulo) se administran en la
+                tabla <code>permisos</code> de Supabase.</p>
             </div>)}
         </div>
       </Card>
     </div>}
+
+    <Modal open={!!editUser} onClose={()=>setEditUser(null)} title="Nuevo usuario"
+      sub="Crea el acceso real — queda activo de inmediato"
+      footer={<><Btn v="outline" onClick={()=>setEditUser(null)}>Cancelar</Btn>
+        <Btn onClick={crearUsuario} icon="check" disabled={guardandoUser}>{guardandoUser?'Creando…':'Crear usuario'}</Btn></>}>
+      {editUser && (()=>{ const uu=(k,v)=>setEditUser({...editUser,[k]:v}); return <div className="space-y-4">
+        <Field label="Nombre completo" req><Input value={editUser.nombre} onChange={e=>uu('nombre',e.target.value)}/></Field>
+        <Field label="Correo electrónico" req><Input type="email" value={editUser.email} onChange={e=>uu('email',e.target.value)}/></Field>
+        <Field label="Contraseña temporal" req hint="Mínimo 8 caracteres — pídele que la cambie al primer ingreso">
+          <Input type="text" value={editUser.password} onChange={e=>uu('password',e.target.value)}/></Field>
+        <Field label="Rol" req><Select value={editUser.rol_codigo} onChange={e=>uu('rol_codigo',e.target.value)}
+          options={(db.roles||[]).map(r=>({v:r.codigo,l:r.nombre}))}/></Field>
+      </div>;})()}
+    </Modal>
 
     {tab==='auditoria' && <Card pad={false}>
       <div className="p-5 border-b border-ink-200 dark:border-ink-800 flex items-center justify-between">
@@ -280,10 +337,6 @@ export default function Configuracion({db, set, toast}){
           <Td className="text-xs text-ink-500">{a.detalle}</Td>
         </tr>)}
       </Table>
-      <div className="p-5 border-t border-ink-200 dark:border-ink-800">
-        <Btn v="danger" s="sm" icon="trash" onClick={resetTodo}>Restablecer sistema con datos de ejemplo</Btn>
-        <p className="text-[11px] text-ink-400 mt-2">Elimina todos los datos guardados en este navegador y recarga los datos de demostración.</p>
-      </div>
     </Card>}
   </Page>;
 }
