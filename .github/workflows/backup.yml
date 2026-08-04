@@ -27,7 +27,7 @@ jobs:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           fecha=$(date +%Y-%m-%d)
-          pg_dump "$DATABASE_URL" --no-owner --no-privileges -f "backup_opera_${fecha}.sql"
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --no-owner --no-privileges -f "backup_opera_${fecha}.sql"
 
       - name: Subir el dump como artefacto
         uses: actions/upload-artifact@v4
