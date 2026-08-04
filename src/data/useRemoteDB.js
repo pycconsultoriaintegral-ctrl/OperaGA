@@ -1,0 +1,163 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '../lib/supabaseClient.js';
+import { TABLAS, TABLAS_SYNCABLES, cfgFromRow, cfgToRow } from '../lib/columnMap.js';
+
+const fmtFechaHora = iso => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+/** Trae todas las tablas de Supabase y arma el mismo objeto `db` que ya
+ *  consumen los 11 módulos (misma forma que el localStorage del prototipo). */
+async function fetchAll(){
+  const [
+    cfgRes, festivosRes, profilesRes, auditoriaRes,
+    ...tablaRes
+  ] = await Promise.all([
+    supabase.from('configuracion').select('*').eq('id', 1).maybeSingle(),
+    supabase.from('festivos').select('fecha').order('fecha'),
+    supabase.from('profiles').select('id,nombre,estado,roles(codigo,nombre)'),
+    supabase.from('auditoria').select('id,fecha,usuario_id,accion,entidad,entidad_id')
+      .order('fecha', { ascending: false }).limit(200),
+    ...TABLAS_SYNCABLES.map(key => supabase.from(TABLAS[key].table).select('*'))
+  ]);
+
+  for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, ...tablaRes]) {
+    if (res.error) throw res.error;
+  }
+
+  const db = {
+    cfg: cfgFromRow(cfgRes.data),
+    festivos: (festivosRes.data || []).map(f => f.fecha)
+  };
+  TABLAS_SYNCABLES.forEach((key, i) => {
+    db[key] = (tablaRes[i].data || []).map(TABLAS[key].fromRow);
+  });
+
+  const perfilesPorId = {};
+  (profilesRes.data || []).forEach(p => { perfilesPorId[p.id] = p; });
+
+  db.usuarios = (profilesRes.data || []).map(p => ({
+    id: p.id, nombre: p.nombre, email: '', // el correo vive en auth.users, no accesible con la anon key
+    rol: (p.roles?.codigo || '—').toUpperCase(), estado: p.estado
+  }));
+
+  db.auditoria = (auditoriaRes.data || []).map(a => ({
+    id: a.id, fecha: fmtFechaHora(a.fecha),
+    usuario: perfilesPorId[a.usuario_id]?.nombre || (a.usuario_id ? a.usuario_id.slice(0,8) : 'Sistema'),
+    accion: a.accion, entidad: a.entidad,
+    detalle: a.entidad_id ? `${a.entidad} · ${a.entidad_id.slice(0,8)}…` : a.entidad
+  }));
+
+  db.turnos = []; // registro crudo de turnos del prototipo original: ningún módulo lo usa hoy
+
+  return db;
+}
+
+/** Sincroniza una tabla insertando/actualizando/eliminando solo lo que cambió
+ *  entre `prevRows` y `nextRows` (comparados por `id`). */
+async function syncTabla(key, prevRows, nextRows){
+  const { table, toRow } = TABLAS[key];
+  const prevMap = new Map(prevRows.map(r => [r.id, r]));
+  const nextMap = new Map(nextRows.map(r => [r.id, r]));
+
+  const inserts = [];
+  const updates = [];
+  for (const [id, row] of nextMap) {
+    const prev = prevMap.get(id);
+    if (!prev) inserts.push({ id, ...toRow(row) });
+    else if (JSON.stringify(prev) !== JSON.stringify(row)) updates.push({ id, ...toRow(row) });
+  }
+  const deletes = [...prevMap.keys()].filter(id => !nextMap.has(id));
+
+  if (inserts.length) { const { error } = await supabase.from(table).insert(inserts); if (error) throw error; }
+  for (const { id, ...rest } of updates) {
+    const { error } = await supabase.from(table).update(rest).eq('id', id);
+    if (error) throw error;
+  }
+  if (deletes.length) { const { error } = await supabase.from(table).delete().in('id', deletes); if (error) throw error; }
+}
+
+async function syncFestivos(prevFestivos, nextFestivos){
+  const prevSet = new Set(prevFestivos), nextSet = new Set(nextFestivos);
+  const toInsert = nextFestivos.filter(f => !prevSet.has(f)).map(fecha => ({ fecha }));
+  const toDelete = prevFestivos.filter(f => !nextSet.has(f));
+  if (toInsert.length) { const { error } = await supabase.from('festivos').insert(toInsert); if (error) throw error; }
+  if (toDelete.length) { const { error } = await supabase.from('festivos').delete().in('fecha', toDelete); if (error) throw error; }
+}
+
+async function syncCfg(prevCfg, nextCfg){
+  if (JSON.stringify(prevCfg) === JSON.stringify(nextCfg)) return;
+  const { error } = await supabase.from('configuracion').update(cfgToRow(nextCfg)).eq('id', 1);
+  if (error) throw error;
+}
+
+/** Envía a Supabase solo lo que cambió entre dos versiones de `db`. */
+async function syncChanges(prevDb, nextDb){
+  await Promise.all([
+    ...TABLAS_SYNCABLES.map(key =>
+      prevDb[key] !== nextDb[key] ? syncTabla(key, prevDb[key], nextDb[key]) : Promise.resolve()),
+    prevDb.festivos !== nextDb.festivos ? syncFestivos(prevDb.festivos, nextDb.festivos) : Promise.resolve(),
+    prevDb.cfg !== nextDb.cfg ? syncCfg(prevDb.cfg, nextDb.cfg) : Promise.resolve()
+  ]);
+}
+
+/**
+ * Reemplazo de useState(loadDB)+saveDB (Fase 0, localStorage) por datos reales
+ * de Supabase: carga inicial, escritura optimista con sincronización en
+ * segundo plano, y refresco automático por Realtime cuando otro usuario
+ * cambia algo — así todos ven la misma información sin recargar la página.
+ */
+export function useRemoteDB(toast){
+  const [db, setDbState] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const dbRef = useRef(null);
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
+  const recargar = useCallback(async () => {
+    try {
+      const fresh = await fetchAll();
+      dbRef.current = fresh;
+      setDbState(fresh);
+    } catch (err) {
+      console.error(err);
+      toastRef.current?.('No se pudo cargar la información: ' + err.message, 'rose');
+    }
+  }, []);
+
+  useEffect(() => {
+    recargar().finally(() => setLoading(false));
+
+    const tablasRealtime = [...TABLAS_SYNCABLES.map(k => TABLAS[k].table), 'festivos', 'configuracion'];
+    let timeoutId = null;
+    const debounceRecargar = () => { clearTimeout(timeoutId); timeoutId = setTimeout(recargar, 400); };
+
+    const channel = supabase.channel('opera-realtime');
+    tablasRealtime.forEach(table => {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, debounceRecargar);
+    });
+    channel.subscribe();
+
+    return () => { clearTimeout(timeoutId); supabase.removeChannel(channel); };
+  }, [recargar]);
+
+  const set = useCallback((fn) => {
+    setDbState(prev => {
+      const base = prev || dbRef.current;
+      if (!base) return prev;
+      const next = typeof fn === 'function' ? fn(base) : fn;
+      dbRef.current = next;
+      syncChanges(base, next).catch(err => {
+        console.error(err);
+        toastRef.current?.('No se pudo guardar en la base de datos: ' + err.message, 'rose');
+        recargar(); // revierte cualquier cambio optimista que no se haya podido guardar
+      });
+      return next;
+    });
+  }, [recargar]);
+
+  return { db, set, loading };
+}

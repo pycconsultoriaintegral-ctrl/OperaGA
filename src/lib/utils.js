@@ -2,7 +2,12 @@
    UTILIDADES  ·  portado literalmente desde el prototipo original
    ══════════════════════════════════════════════════════════════════════════ */
 
-export const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+// UUID real: los id que genera el cliente deben poder insertarse directo en
+// columnas `uuid` de Postgres (empleados, propiedades, asistencia, etc.).
+export const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
+  ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random()*16|0, v = c==='x' ? r : (r&0x3|0x8); return v.toString(16); });
 export const pad = n => String(n).padStart(2,'0');
 export const hoy = () => new Date().toISOString().slice(0,10);
 

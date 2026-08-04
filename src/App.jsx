@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Icon, Avatar, useToast } from './components/ui.jsx';
-import { loadDB, saveDB } from './lib/seed.js';
+import { useRemoteDB } from './data/useRemoteDB.js';
 import { calcularCompensatorios } from './lib/payroll.js';
 import { fmtFechaLarga } from './lib/utils.js';
 import { useAuth } from './auth/AuthProvider.jsx';
@@ -65,17 +65,15 @@ function Pantalla({ msg, children }){
 }
 
 function AppShell({ perfil, rol, has, onLogout }){
-  const [db,setDb]   = useState(loadDB);
   const [vista,setVista] = useState('dashboard');
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();
+  const { db, set, loading: dbLoading } = useRemoteDB(toast);
 
-  useEffect(()=>{ saveDB(db); },[db]);
   useEffect(()=>{ document.documentElement.classList.toggle('dark',dark);
     try{localStorage.setItem('opera_dark',dark?'1':'0');}catch(e){} },[dark]);
 
-  const set = useCallback(fn => setDb(d => typeof fn==='function' ? fn(d) : fn), []);
   const go  = useCallback(v => { setVista(v); setMenu(false); window.scrollTo(0,0); }, []);
 
   // Solo se muestran en el menú las opciones a las que el rol tiene acceso.
@@ -89,14 +87,19 @@ function AppShell({ perfil, rol, has, onLogout }){
   useEffect(() => { if (navVisible.length && !navVisible.some(n=>n.id===vista)) go(navVisible[0].id); }, [navVisible]);
 
   // Contadores para los badges del menú
-  const badges = useMemo(()=>({
-    novedades: db.novedades.filter(n=>n.estado==='PENDIENTE').length,
-    marcacion: db.asistencia.filter(r=>r.validacion && !['OK','MANUAL'].includes(r.validacion)).length,
-    enreserva: db.estadias.filter(e=>e.estado==='ACTIVA').length,
-    horarios: calcularCompensatorios(db.empleados.filter(e=>e.estado==='ACTIVO'),
-      db.horarios||[], db.asistencia, db.novedades, db.festivos, db.cfg)
-      .reduce((s,c)=>s+Math.max(0,c.saldo),0)
-  }),[db]);
+  const badges = useMemo(()=>{
+    if (!db) return {};
+    return {
+      novedades: db.novedades.filter(n=>n.estado==='PENDIENTE').length,
+      marcacion: db.asistencia.filter(r=>r.validacion && !['OK','MANUAL'].includes(r.validacion)).length,
+      enreserva: db.estadias.filter(e=>e.estado==='ACTIVA').length,
+      horarios: calcularCompensatorios(db.empleados.filter(e=>e.estado==='ACTIVO'),
+        db.horarios||[], db.asistencia, db.novedades, db.festivos, db.cfg)
+        .reduce((s,c)=>s+Math.max(0,c.saldo),0)
+    };
+  },[db]);
+
+  if (dbLoading || !db) return <Pantalla msg="Cargando datos de la operación…"/>;
 
   const P = { db, set, toast, go };
   const VISTAS = {
