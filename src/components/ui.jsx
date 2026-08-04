@@ -120,9 +120,10 @@ export const Modal = ({open, onClose, title, sub, children, w='max-w-2xl', foote
   </div>;
 };
 
-export const Avatar = ({nombre, size='w-9 h-9', tone}) => {
+export const Avatar = ({nombre, foto, size='w-9 h-9', tone}) => {
   const tones = ['brand','emerald','violet','amber','sky','rose','teal','indigo'];
   const t = tone || tones[(nombre||'').length % tones.length];
+  if(foto) return <img src={foto} alt={nombre||''} className={`${size} rounded-full object-cover ring-1 ring-inset ring-ink-200/70 dark:ring-ink-800 shrink-0`}/>;
   return <div className={`${size} rounded-full grid place-items-center font-bold text-[11px] ring-1 ring-inset shrink-0 ${TONE[t]}`}>{iniciales(nombre)}</div>;
 };
 

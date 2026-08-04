@@ -2,25 +2,41 @@ import { useState, useMemo } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select, Area, Empty, IN, Icon, exportCSV } from '../components/ui.jsx';
 import { CARGOS, CONFIG_DEFAULT, EPS_LIST, AFP_LIST, ARL_LIST } from '../lib/constants.js';
 import { uid, fmtCOP, fmtFecha, edad, diffDias, hoy } from '../lib/utils.js';
+import { supabase } from '../lib/supabaseClient.js';
 
 export default function Empleados({db, set, toast}){
   const [q,setQ] = useState(''); const [fc,setFc] = useState('');
   const [sel,setSel] = useState(null); const [edit,setEdit] = useState(null);
+  const [subiendoFoto,setSubiendoFoto] = useState(false);
 
   const lista = useMemo(() => db.empleados.filter(e =>
     (!q || e.nombre.toLowerCase().includes(q.toLowerCase()) || e.doc.includes(q)) &&
     (!fc || e.cargo===fc)), [db.empleados,q,fc]);
 
-  const vacio = { id:'', nombre:'', doc:'', tipoDoc:'CC', cargo:'Mucama', nacimiento:'', tel:'', email:'',
+  const vacio = () => ({ id:uid(), nombre:'', doc:'', tipoDoc:'CC', cargo:'Mucama', nacimiento:'', tel:'', email:'',
     dir:'', ingreso:hoy(), contrato:'Término indefinido', salario:CONFIG_DEFAULT.salarioMinimo,
-    eps:'Sura', afp:'Porvenir', arl:'Sura ARL', banco:'', cuenta:'', contactoEmg:'', estado:'ACTIVO', interno:false };
+    eps:'Sura', afp:'Porvenir', arl:'Sura ARL', banco:'', cuenta:'', contactoEmg:'', estado:'ACTIVO', interno:false, foto:null });
 
   const guardar = () => {
     if(!edit.nombre.trim() || !edit.doc.trim()) return toast('Nombre y documento son obligatorios','rose');
-    const nuevo = !edit.id;
-    const e = nuevo ? {...edit, id:uid()} : edit;
-    set(d => ({...d, empleados: nuevo ? [...d.empleados, e] : d.empleados.map(x=>x.id===e.id?e:x)}));
+    const nuevo = !db.empleados.some(x=>x.id===edit.id);
+    set(d => ({...d, empleados: nuevo ? [...d.empleados, edit] : d.empleados.map(x=>x.id===edit.id?edit:x)}));
     setEdit(null); toast(nuevo?'Empleado creado':'Cambios guardados');
+  };
+
+  const subirFoto = async (file, empleadoId, onDone) => {
+    if(!file) return;
+    setSubiendoFoto(true);
+    try{
+      const ext = file.name.split('.').pop() || 'jpg';
+      const ruta = `${empleadoId}/foto.${ext}`;
+      const { error } = await supabase.storage.from('empleados').upload(ruta, file, { upsert:true, cacheControl:'3600' });
+      if(error) throw error;
+      const { data } = supabase.storage.from('empleados').getPublicUrl(ruta);
+      onDone(`${data.publicUrl}?v=${Date.now()}`);
+      toast('Foto actualizada');
+    }catch(e){ toast('No se pudo subir la foto: '+e.message,'rose'); }
+    setSubiendoFoto(false);
   };
   const inactivar = e => {   // borrado lógico
     set(d => ({...d, empleados: d.empleados.map(x=>x.id===e.id?{...x,estado:x.estado==='ACTIVO'?'INACTIVO':'ACTIVO'}:x)}));
@@ -31,7 +47,7 @@ export default function Empleados({db, set, toast}){
     actions={<><Btn v="outline" icon="download" onClick={()=>exportCSV('empleados', db.empleados.map(e=>({
         nombre:e.nombre,documento:e.doc,cargo:e.cargo,ingreso:e.ingreso,contrato:e.contrato,
         salario:e.salario,eps:e.eps,afp:e.afp,arl:e.arl,telefono:e.tel,estado:e.estado})))}>Exportar</Btn>
-      <Btn icon="plus" onClick={()=>setEdit(vacio)}>Nuevo empleado</Btn></>}>
+      <Btn icon="plus" onClick={()=>setEdit(vacio())}>Nuevo empleado</Btn></>}>
 
     <Card pad={false}>
       <div className="p-4 flex flex-col sm:flex-row gap-2.5 border-b border-ink-200 dark:border-ink-800">
@@ -49,7 +65,7 @@ export default function Empleados({db, set, toast}){
           <tr key={e.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40 transition-colors">
             <Td>
               <div className="flex items-center gap-3">
-                <Avatar nombre={e.nombre}/>
+                <Avatar nombre={e.nombre} foto={e.foto}/>
                 <div className="min-w-0"><p className="font-bold text-ink-900 dark:text-white truncate">{e.nombre}</p>
                   <p className="text-[11px] text-ink-500">{e.tipoDoc} {e.doc} · {edad(e.nacimiento)} años</p></div>
               </div></Td>
@@ -75,7 +91,7 @@ export default function Empleados({db, set, toast}){
         <Btn v="outline" onClick={()=>{setEdit(sel);setSel(null);}} icon="edit">Editar</Btn></>}>
       {sel && <div className="space-y-5">
         <div className="flex items-center gap-4 p-4 rounded-xl bg-ink-50 dark:bg-ink-950/50">
-          <Avatar nombre={sel.nombre} size="w-16 h-16 text-lg"/>
+          <Avatar nombre={sel.nombre} foto={sel.foto} size="w-16 h-16 text-lg"/>
           <div className="min-w-0">
             <h4 className="text-lg font-extrabold text-ink-900 dark:text-white">{sel.nombre}</h4>
             <p className="text-sm text-ink-500">{sel.cargo} · {sel.tipoDoc} {sel.doc}</p>
@@ -109,6 +125,19 @@ export default function Empleados({db, set, toast}){
     <Modal open={!!edit} onClose={()=>setEdit(null)} title={edit?.id?'Editar empleado':'Nuevo empleado'} w="max-w-3xl"
       footer={<><Btn v="outline" onClick={()=>setEdit(null)}>Cancelar</Btn><Btn onClick={guardar} icon="check">Guardar</Btn></>}>
       {edit && (()=>{ const u=(k,v)=>setEdit({...edit,[k]:v}); return <div className="space-y-5">
+        <div className="flex items-center gap-4">
+          <Avatar nombre={edit.nombre} foto={edit.foto} size="w-16 h-16 text-lg"/>
+          <div>
+            <label className="inline-block">
+              <span className={`inline-flex items-center justify-center font-semibold rounded-lg transition-colors px-3.5 py-2 text-sm gap-2 cursor-pointer ring-1 ring-inset ring-ink-300 dark:ring-ink-700 text-ink-700 dark:text-ink-200 hover:bg-ink-50 dark:hover:bg-ink-800 bg-white dark:bg-ink-900 ${subiendoFoto?'opacity-50 pointer-events-none':''}`}>
+                {subiendoFoto?'Subiendo…':'Subir foto'}
+                <input type="file" accept="image/*" className="hidden" disabled={subiendoFoto}
+                  onChange={e=>subirFoto(e.target.files?.[0], edit.id, url=>u('foto',url))}/>
+              </span>
+            </label>
+            <p className="text-[11px] text-ink-400 mt-1.5">JPG o PNG. La foto se sube de inmediato, pero dale "Guardar" para conservar el cambio en la ficha.</p>
+          </div>
+        </div>
         <div><h5 className="text-[11px] font-bold uppercase tracking-wide text-brand-600 mb-3">Identificación</h5>
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2"><Field label="Nombre completo" req><Input value={edit.nombre} onChange={e=>u('nombre',e.target.value)}/></Field></div>

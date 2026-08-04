@@ -8,13 +8,19 @@ export default function Propiedades({db, set, toast}){
   const [edit,setEdit] = useState(null); const [editR,setEditR] = useState(null);
   const HOY = '2026-07-24';
 
-  const vacio  = { id:'', nombre:'', tipo:'Casa', ubicacion:'', capacidad:4, habitaciones:2, banos:2,
-                   estado:'DISPONIBLE', mayordomo:'', tarifa:500000, notas:'' };
+  const vacio  = { id:'', nombre:'', codigo:'', tipo:'Casa', ubicacion:'', capacidad:4, habitaciones:2, banos:2,
+                   estado:'DISPONIBLE', mayordomo:'', tarifa:500000, notas:'', lat:'', lng:'', ipsTexto:'' };
   const vacioR = { id:'', propiedad:db.propiedades[0]?.id||'', huesped:'', desde:hoy(), hasta:addDias(hoy(),3),
                    huespedes:2, canal:'Airbnb', valor:0, estado:'CONFIRMADA' };
 
-  const guardar = () => { if(!edit.nombre.trim()) return toast('El nombre es obligatorio','rose');
-    const n=!edit.id, p=n?{...edit,id:uid()}:edit;
+  const guardar = () => {
+    if(!edit.nombre.trim()) return toast('El nombre es obligatorio','rose');
+    if(!edit.codigo.trim()) return toast('El código de la propiedad es obligatorio (se usa en la marcación QR)','rose');
+    const n=!edit.id;
+    const { ipsTexto, ...resto } = edit;
+    const p = { ...resto, id: n?uid():edit.id, codigo: edit.codigo.trim().toUpperCase(),
+      lat: edit.lat===''?null:+edit.lat, lng: edit.lng===''?null:+edit.lng,
+      ips: (ipsTexto||'').split(',').map(s=>s.trim()).filter(Boolean) };
     set(d=>({...d, propiedades: n?[...d.propiedades,p]:d.propiedades.map(x=>x.id===p.id?p:x)}));
     setEdit(null); toast(n?'Propiedad creada':'Cambios guardados'); };
 
@@ -67,7 +73,7 @@ export default function Propiedades({db, set, toast}){
               <p className="text-[11px] text-ink-500">Próxima: <b className="text-ink-800 dark:text-ink-100">{prox.huesped}</b> · {fmtFecha(prox.desde)}</p></div>}
           </div>
           <div className="mt-4 flex gap-2">
-            <Btn v="outline" s="sm" icon="edit" onClick={()=>setEdit(p)} className="flex-1">Editar</Btn>
+            <Btn v="outline" s="sm" icon="edit" onClick={()=>setEdit({...p, lat:p.lat??'', lng:p.lng??'', ipsTexto:(p.ips||[]).join(', ')})} className="flex-1">Editar</Btn>
             <Btn v="soft" s="sm" icon="calendar" onClick={()=>{setEditR({...vacioR,propiedad:p.id});}} className="flex-1">Reservar</Btn>
           </div>
         </Card>;
@@ -127,6 +133,8 @@ export default function Propiedades({db, set, toast}){
       footer={<><Btn v="outline" onClick={()=>setEdit(null)}>Cancelar</Btn><Btn onClick={guardar} icon="check">Guardar</Btn></>}>
       {edit && (()=>{const u=(k,v)=>setEdit({...edit,[k]:v}); return <div className="grid sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2"><Field label="Nombre" req><Input value={edit.nombre} onChange={e=>u('nombre',e.target.value)}/></Field></div>
+        <Field label="Código" req hint="El que va en el QR fijo de la propiedad, ej. VMB-01">
+          <Input value={edit.codigo} onChange={e=>u('codigo',e.target.value.toUpperCase())} className="uppercase"/></Field>
         <Field label="Tipo"><Select value={edit.tipo} onChange={e=>u('tipo',e.target.value)} options={['Casa','Apartamento','Villa','Finca','Penthouse']}/></Field>
         <Field label="Estado"><Select value={edit.estado} onChange={e=>u('estado',e.target.value)}
           options={Object.entries(ESTADOS_PROP).map(([v,o])=>({v,l:o.label}))}/></Field>
@@ -138,6 +146,17 @@ export default function Propiedades({db, set, toast}){
         <div className="sm:col-span-2"><Field label="Mayordomo asignado">
           <Select value={edit.mayordomo} onChange={e=>u('mayordomo',e.target.value)}
             options={[{v:'',l:'Sin asignar'},...mayordomos.map(m=>({v:m.id,l:m.nombre}))]}/></Field></div>
+
+        <div className="sm:col-span-2 pt-2 mt-1 border-t border-ink-100 dark:border-ink-800">
+          <h5 className="text-[11px] font-bold uppercase tracking-wide text-brand-600 mb-3">Marcación — geocerca e IP</h5>
+        </div>
+        <Field label="Latitud" hint="Clic derecho en Google Maps sobre la propiedad → copiar coordenadas">
+          <Input type="number" step="0.000001" value={edit.lat} onChange={e=>u('lat',e.target.value)} placeholder="10.4712"/></Field>
+        <Field label="Longitud">
+          <Input type="number" step="0.000001" value={edit.lng} onChange={e=>u('lng',e.target.value)} placeholder="-75.4890"/></Field>
+        <div className="sm:col-span-2"><Field label="IPs registradas" hint="Separadas por coma. Solo corroboran, nunca bloquean una marcación">
+          <Input value={edit.ipsTexto} onChange={e=>u('ipsTexto',e.target.value)} placeholder="181.49.22.140, 190.85.14.77"/></Field></div>
+
         <div className="sm:col-span-2"><Field label="Notas"><Area value={edit.notas} onChange={e=>u('notas',e.target.value)}/></Field></div>
       </div>;})()}
     </Modal>
