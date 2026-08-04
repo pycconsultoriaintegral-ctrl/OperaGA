@@ -3,6 +3,10 @@ import { Icon, Avatar, useToast } from './components/ui.jsx';
 import { loadDB, saveDB } from './lib/seed.js';
 import { calcularCompensatorios } from './lib/payroll.js';
 import { fmtFechaLarga } from './lib/utils.js';
+import { useAuth } from './auth/AuthProvider.jsx';
+import { usePermisos } from './auth/usePermisos.js';
+import Login from './auth/Login.jsx';
+import ResetPassword from './auth/ResetPassword.jsx';
 
 import Dashboard from './features/Dashboard.jsx';
 import Empleados from './features/Empleados.jsx';
@@ -16,21 +20,51 @@ import Liquidacion from './features/Liquidacion.jsx';
 import Reportes from './features/Reportes.jsx';
 import Configuracion from './features/Configuracion.jsx';
 
+// Módulo de permisos requerido para ver cada opción del menú. `null` = visible
+// para cualquiera que haya iniciado sesión (no hay dato sensible detrás).
 const NAV = [
-  { id:'dashboard',   label:'Panel de control', icon:'dashboard' },
-  { id:'empleados',   label:'Empleados',        icon:'users' },
-  { id:'propiedades', label:'Propiedades',      icon:'home' },
-  { id:'horarios',    label:'Horarios',         icon:'calendar' },
-  { id:'asistencia',  label:'Asistencia',       icon:'clock' },
-  { id:'marcacion',   label:'Marcación',        icon:'qr' },
-  { id:'enreserva',   label:'En reserva',       icon:'bed' },
-  { id:'novedades',   label:'Novedades',        icon:'doc' },
-  { id:'liquidacion', label:'Liquidación',      icon:'money' },
-  { id:'reportes',    label:'Reportes',         icon:'chart' },
-  { id:'config',      label:'Configuración',    icon:'settings' }
+  { id:'dashboard',   label:'Panel de control', icon:'dashboard', modulo:null },
+  { id:'empleados',   label:'Empleados',        icon:'users',     modulo:['empleados','empleados_publico'] },
+  { id:'propiedades', label:'Propiedades',      icon:'home',      modulo:'propiedades' },
+  { id:'horarios',    label:'Horarios',         icon:'calendar',  modulo:'horarios' },
+  { id:'asistencia',  label:'Asistencia',       icon:'clock',     modulo:'asistencia' },
+  { id:'marcacion',   label:'Marcación',        icon:'qr',        modulo:'asistencia' },
+  { id:'enreserva',   label:'En reserva',       icon:'bed',       modulo:'asistencia' },
+  { id:'novedades',   label:'Novedades',        icon:'doc',       modulo:'novedades' },
+  { id:'liquidacion', label:'Liquidación',      icon:'money',     modulo:'liquidacion' },
+  { id:'reportes',    label:'Reportes',         icon:'chart',     modulo:'reportes' },
+  { id:'config',      label:'Configuración',    icon:'settings',  modulo:['configuracion','usuarios'] }
 ];
 
+/** Puerta de autenticación: decide qué pantalla mostrar antes de entrar a la app. */
 export default function App(){
+  const { session, loading: authLoading, recovery, signOut } = useAuth();
+  const { perfil, rol, has, loading: permLoading } = usePermisos();
+
+  if (authLoading) return <Pantalla msg="Cargando…"/>;
+  if (recovery) return <ResetPassword/>;
+  if (!session) return <Login/>;
+  if (permLoading) return <Pantalla msg="Cargando tu perfil…"/>;
+  if (!perfil) return (
+    <Pantalla msg="Tu cuenta inició sesión correctamente, pero no tiene un perfil asignado en el sistema.
+      Pide a un administrador que te dé de alta en Configuración → Usuarios y roles.">
+      <button onClick={signOut} className="mt-4 text-sm font-semibold text-brand-600 hover:text-brand-700">Cerrar sesión</button>
+    </Pantalla>
+  );
+
+  return <AppShell perfil={perfil} rol={rol} has={has} onLogout={signOut}/>;
+}
+
+function Pantalla({ msg, children }){
+  return <div className="min-h-screen grid place-items-center bg-ink-50 dark:bg-ink-950 px-6 text-center">
+    <div className="max-w-sm">
+      <p className="text-sm text-ink-500 dark:text-ink-400 whitespace-pre-line">{msg}</p>
+      {children}
+    </div>
+  </div>;
+}
+
+function AppShell({ perfil, rol, has, onLogout }){
   const [db,setDb]   = useState(loadDB);
   const [vista,setVista] = useState('dashboard');
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
@@ -43,6 +77,16 @@ export default function App(){
 
   const set = useCallback(fn => setDb(d => typeof fn==='function' ? fn(d) : fn), []);
   const go  = useCallback(v => { setVista(v); setMenu(false); window.scrollTo(0,0); }, []);
+
+  // Solo se muestran en el menú las opciones a las que el rol tiene acceso.
+  // Esto es cosmético: la protección real está en las políticas RLS de Supabase.
+  const navVisible = useMemo(() => NAV.filter(n => {
+    if (!n.modulo) return true;
+    const modulos = Array.isArray(n.modulo) ? n.modulo : [n.modulo];
+    return modulos.some(m => has(m,'ver'));
+  }), [has]);
+
+  useEffect(() => { if (navVisible.length && !navVisible.some(n=>n.id===vista)) go(navVisible[0].id); }, [navVisible]);
 
   // Contadores para los badges del menú
   const badges = useMemo(()=>({
@@ -84,7 +128,7 @@ export default function App(){
 
       {/* Navegación */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-        {NAV.map(n => {
+        {navVisible.map(n => {
           const act = vista===n.id; const b = badges[n.id];
           return <button key={n.id} onClick={()=>go(n.id)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
@@ -106,12 +150,15 @@ export default function App(){
             <span className="text-white/40">{db.cfg.horasSemanales} h/sem · nocturno {db.cfg.nocturnoInicio}:00</span></p>
         </div>
         <div className="flex items-center gap-2 px-2">
-          <Avatar nombre="PYC Consultoria" size="w-8 h-8"/>
-          <div className="min-w-0 flex-1"><p className="text-xs font-bold text-white truncate">PYC Consultoria Integral</p>
-            <p className="text-[10px] text-white/40">SAS · Administrador</p></div>
+          <Avatar nombre={perfil.nombre} size="w-8 h-8"/>
+          <div className="min-w-0 flex-1"><p className="text-xs font-bold text-white truncate">{perfil.nombre}</p>
+            <p className="text-[10px] text-white/40 truncate">{rol?.nombre || '—'}</p></div>
           <button onClick={()=>setDark(!dark)} title="Cambiar tema"
             className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/[.08]">
             <Icon n={dark?'sun':'moon'} c="w-4 h-4"/></button>
+          <button onClick={onLogout} title="Cerrar sesión"
+            className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/[.08]">
+            <Icon n="logout" c="w-4 h-4"/></button>
         </div>
       </div>
     </aside>
@@ -148,7 +195,7 @@ export default function App(){
       <main className="flex-1 p-4 sm:p-6 max-w-[1600px] w-full">{VISTAS[vista]}</main>
 
       <footer className="px-6 py-4 border-t border-ink-200 dark:border-ink-800 text-[11px] text-ink-400 flex flex-wrap justify-between gap-2">
-        <span>OPERA v1.0 · Prototipo funcional · Datos almacenados localmente en este navegador</span>
+        <span>OPERA v1.0 · Sesión: {perfil.nombre} ({rol?.nombre || 'sin rol'})</span>
         <span>Parámetros conforme a Ley 2101/2021 y Ley 2466/2025 — validar con abogado laboralista antes de uso en producción</span>
       </footer>
     </div>
