@@ -55,6 +55,11 @@ Esquema en `supabase/migrations/0001_init.sql` y `0002_realtime.sql`. Tablas:
   programados, 22 novedades, 295 estadías (ver
   `supabase/MIGRACION_2026-08-04.md` para el detalle completo y las
   decisiones tomadas durante la migración).
+- **Storage**: bucket `empleados` (público, con RLS) para fotos de
+  empleados — `supabase/migrations/0004_storage_fotos.sql`.
+- **Geocerca real**: el formulario de Propiedades ahora captura código, lat/lng
+  e IPs, necesarios para que la validación de marcación (Marcación → Kiosco)
+  funcione contra coordenadas reales en vez de "sin definir".
 
 ## 4. Autenticación
 
@@ -72,13 +77,18 @@ administrador.
   en el frontend — un usuario sin permiso no puede leer/escribir esas filas
   aunque manipule la app o llame a la API directamente.
 - El menú lateral se filtra según el rol (cosmético, refuerza la RLS).
+- **Configuración → Usuarios y roles** ya es una pantalla funcional: crear
+  usuario (correo + contraseña temporal + rol), cambiar rol, activar/
+  desactivar. La operación privilegiada corre en la Edge Function
+  `admin-usuarios` (`supabase/functions/admin-usuarios/`), que valida el
+  permiso del que llama antes de tocar nada — la `service_role key` nunca
+  sale del lado del servidor.
 
-⚠️ **Pendiente real**: no existe una pantalla en la app para crear usuarios,
-cambiar su rol o desactivarlos — hoy se hace manualmente: crear el usuario
-en Supabase Authentication → Users, y luego un `INSERT` en `profiles` por
-SQL Editor (procedimiento documentado en los mensajes de la Fase 3). Esto
-funciona pero no es una experiencia de administración real. Ver
-recomendaciones.
+⚠️ **Pendiente real**: la matriz de permisos por rol solo se ha probado con
+la cuenta `administrador`. Se creó un usuario de prueba con rol
+`supervisor` pero **todavía no se inició sesión con él** para confirmar en
+la práctica que ve solo lo que le corresponde (el cliente lo va a probar).
+No marcar este punto como resuelto hasta que se confirme.
 
 ## 6. Seguridad
 
@@ -147,8 +157,10 @@ Settings → Domains, y apuntar los registros DNS que Vercel indique.
 | Recuperación de contraseña | ✅ confirmado, en local y en producción |
 | Cierre de sesión | ✅ confirmado |
 | Multiusuario en tiempo real (2 pestañas) | ✅ confirmado con datos de ejemplo |
-| RLS bloqueando acceso sin permiso | ⚠️ verificado por diseño (políticas creadas y probadas en desarrollo), **no probado con un usuario real de rol distinto a administrador** |
-| Crear/editar/desactivar usuario desde la app | ❌ no existe esa pantalla (ver sección 5) |
+| RLS bloqueando acceso sin permiso | ⚠️ verificado por diseño (políticas creadas y probadas en desarrollo), **no probado con un usuario real de rol distinto a administrador** — hay un usuario Supervisor de prueba creado, falta iniciar sesión con él |
+| Crear/editar/desactivar usuario desde la app | ✅ implementado (Configuración → Usuarios y roles + Edge Function `admin-usuarios`) |
+| Subir foto de empleado | ⚠️ implementado, pendiente de que el usuario lo pruebe en producción |
+| Geocerca de propiedad (lat/lng/IP) editable | ⚠️ implementado, pendiente de que el usuario lo pruebe en producción |
 | Backup automático nocturno | ✅ corrida verde, artefacto generado |
 | Restauración desde backup | ⚠️ documentada, **no ejecutada nunca en la práctica** |
 | Despliegue en producción | ✅ confirmado por el usuario, sin errores de consola |
@@ -159,8 +171,8 @@ Settings → Domains, y apuntar los registros DNS que Vercel indique.
    `gestion_humana` y `consulta` tienen permisos definidos en la base pero
    nadie ha iniciado sesión con ellos para confirmar que el filtrado
    funciona como se espera en la práctica.
-2. **Sin pantalla de administración de usuarios** — alta fricción operativa
-   si se necesita dar de alta gente seguido.
+2. ~~Sin pantalla de administración de usuarios~~ — resuelto: Configuración →
+   Usuarios y roles ya permite crear/cambiar rol/desactivar de verdad.
 3. **`service_role key` potencialmente expuesta** en el historial de este
    chat — pendiente confirmar rotación.
 4. **Sin PITR** (plan Free) — ante un error grave, la recuperación es al
@@ -183,10 +195,9 @@ Settings → Domains, y apuntar los registros DNS que Vercel indique.
 
 ## 14. Recomendaciones futuras
 
-- Construir la pantalla de administración de usuarios (crear, cambiar rol,
-  desactivar) — hoy es 100% manual vía SQL.
-- Probar el sistema con una cuenta de cada rol antes de dar acceso real a
-  supervisores/gestión humana.
+- Iniciar sesión con el usuario Supervisor de prueba (y crear uno de
+  `gestion_humana` y `consulta` también) antes de dar acceso real a nadie
+  más — confirmar que cada uno ve exactamente lo que le corresponde.
 - Subir `opera-dev` (o el proyecto que se use como producción real) a plan
   Pro de Supabase (~US$25/mes) antes de operar nómina real, para tener PITR.
 - Hacer un simulacro real de restauración de backup al menos una vez.
