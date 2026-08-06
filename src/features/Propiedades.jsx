@@ -154,7 +154,7 @@ export default function Propiedades({db, set, toast}){
           <Input type="number" step="0.000001" value={edit.lat} onChange={e=>u('lat',e.target.value)} placeholder="10.4712"/></Field>
         <Field label="Longitud">
           <Input type="number" step="0.000001" value={edit.lng} onChange={e=>u('lng',e.target.value)} placeholder="-75.4890"/></Field>
-        <div className="sm:col-span-2"><Field label="IPs registradas" hint="Separadas por coma. Solo corroboran, nunca bloquean una marcación">
+        <div className="sm:col-span-2"><Field label="IPs registradas" hint="IP pública del internet de la propiedad (no la del router — esa empieza por 192.168 o 10.x y nunca va a coincidir). Sepáralas por coma si hay varias. Solo corroboran, nunca bloquean una marcación">
           <Input value={edit.ipsTexto} onChange={e=>u('ipsTexto',e.target.value)} placeholder="181.49.22.140, 190.85.14.77"/></Field></div>
 
         <div className="sm:col-span-2"><Field label="Notas"><Area value={edit.notas} onChange={e=>u('notas',e.target.value)}/></Field></div>
