@@ -50,7 +50,7 @@ export const FESTIVOS_2027 = ['2027-01-01','2027-01-11','2027-03-22','2027-03-25
   '2027-05-01','2027-05-10','2027-05-31','2027-06-07','2027-07-05','2027-07-20','2027-08-07',
   '2027-08-16','2027-10-18','2027-11-01','2027-11-15','2027-12-08','2027-12-25'];
 
-export const CARGOS = ['Mayordomo','Mucama','Conductor','Mantenimiento','Supervisor'];
+export const CARGOS = ['Mayordomo','Mucama','Conductor','Mantenimiento','Supervisor','Administrativo'];
 
 export const TIPOS_TIEMPO = {
   EFECTIVO:      { id:'EFECTIVO',      label:'Trabajo efectivo',  color:'emerald', desc:'Prestación activa de servicios' },

@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Stat, Icon, Tabs, exportCSV } from '../components/ui.jsx';
 import { liquidar, valorizar, prestaciones, aportes } from '../lib/payroll.js';
-import { fmtCOP, fmtNum, fmtFecha, hoy, pad } from '../lib/utils.js';
+import { TIPOS_NOVEDAD } from '../lib/constants.js';
+import { fmtCOP, fmtNum, fmtFecha, hoy, pad, diffDias } from '../lib/utils.js';
 
 // Límites del mes en curso, para los atajos de período y los valores por defecto.
 function mesActual(){
@@ -11,14 +12,30 @@ function mesActual(){
   return { primero:f(1), quince:f(15), dieciseis:f(16), ultimo:f(ultimoDia) };
 }
 
+// Días de una novedad NO remunerada (según TIPOS_NOVEDAD) que caen dentro del período.
+function diasNoRemuneradosEnPeriodo(novedades, empId, desde, hasta){
+  return novedades
+    .filter(n => n.empleado===empId && !TIPOS_NOVEDAD[n.tipo]?.remunerado
+      && n.desde<=hasta && n.hasta>=desde)
+    .reduce((s,n) => {
+      const ini = n.desde > desde ? n.desde : desde;
+      const fin = n.hasta < hasta ? n.hasta : hasta;
+      return s + Math.max(0, diffDias(ini,fin) + 1);
+    }, 0);
+}
+
 export default function Liquidacion({db, toast}){
   const m = mesActual();
   const [desde,setDesde] = useState(m.primero);
   const [hasta,setHasta] = useState(hoy());
   const [sel,setSel] = useState(null);
-  const [modo,setModo] = useState('completa'); // 'completa' | 'basica' (sin horas extras ni recargos)
+  const [modo,setModo] = useState('completa'); // 'completa' (operativos, con recargos) | 'admin' (nómina fija administrativos)
 
-  const calc = useMemo(() => db.empleados.filter(e=>e.estado==='ACTIVO').map(e => {
+  const operativos = useMemo(()=>db.empleados.filter(e=>e.estado==='ACTIVO' && e.cargo!=='Administrativo'), [db.empleados]);
+  const administrativos = useMemo(()=>db.empleados.filter(e=>e.estado==='ACTIVO' && e.cargo==='Administrativo'), [db.empleados]);
+
+  // ── Liquidación completa (personal operativo, por horas + recargos) ──
+  const calc = useMemo(() => operativos.map(e => {
     const regs = db.asistencia.filter(r=>r.empleado===e.id && r.fecha>=desde && r.fecha<=hasta);
     const res = liquidar(regs, db.cfg, db.festivos);
     const val = valorizar(res, e.salario, db.cfg);
@@ -29,42 +46,46 @@ export default function Liquidacion({db, toast}){
       ? db.cfg.auxTransporte * dias/30 : 0;
     const devengado = val.total + auxT;
     const deducciones = ap.empleado.salud + ap.empleado.pension;
-
-    // Nómina básica: todas las horas efectivas al valor hora simple, sin
-    // aplicar los factores de recargo (extra/nocturno/dominical). La
-    // disponibilidad se mantiene igual — no es un recargo, es otra tarifa.
-    const valorHorasBasico = res.totalEfectivo * val.valorHoraBase;
-    const devengadoBasico = valorHorasBasico + val.disponibilidad.total + auxT;
-    const apBasico = aportes(devengadoBasico);
-    const prestBasico = prestaciones(devengadoBasico, dias, db.cfg);
-    const deduccionesBasico = apBasico.empleado.salud + apBasico.empleado.pension;
-    const netoBasico = devengadoBasico - deduccionesBasico;
-    const costoEmpresaBasico = devengadoBasico
-      + Object.values(apBasico.empleador).reduce((a,b)=>a+b,0)
-      + Object.values(prestBasico).reduce((a,b)=>a+b,0);
-
     return { emp:e, res, val, dias, prest, ap, auxT, devengado, deducciones, neto: devengado-deducciones,
-      costoEmpresa: devengado + Object.values(ap.empleador).reduce((a,b)=>a+b,0) + Object.values(prest).reduce((a,b)=>a+b,0),
-      valorHorasBasico, devengadoBasico, deduccionesBasico, netoBasico, costoEmpresaBasico };
-  }), [db,desde,hasta]);
+      costoEmpresa: devengado + Object.values(ap.empleador).reduce((a,b)=>a+b,0) + Object.values(prest).reduce((a,b)=>a+b,0) };
+  }), [operativos, db.asistencia, db.cfg, db.festivos, desde, hasta]);
 
   const tot = calc.reduce((a,c)=>({
     horas:a.horas+c.res.totalEfectivo, disp:a.disp+c.res.disponibilidadHrs,
-    devengado:a.devengado+(modo==='basica'?c.devengadoBasico:c.devengado),
-    neto:a.neto+(modo==='basica'?c.netoBasico:c.neto),
-    costoEmpresa:a.costoEmpresa+(modo==='basica'?c.costoEmpresaBasico:c.costoEmpresa)
+    devengado:a.devengado+c.devengado, neto:a.neto+c.neto, costoEmpresa:a.costoEmpresa+c.costoEmpresa
   }),{horas:0,disp:0,devengado:0,neto:0,costoEmpresa:0});
 
+  // ── Nómina básica (administrativos, salario fijo — sin horas ni recargos) ──
+  // salario + aux. transporte + bonificación − 4% EPS − 4% pensión, prorateado
+  // al período seleccionado y descontando los días de novedades NO remuneradas
+  // (ausencias injustificadas, permisos no remunerados, llamados de atención).
+  const diasPeriodo = Math.max(0, diffDias(desde,hasta) + 1);
+  const calcAdmin = useMemo(() => administrativos.map(e => {
+    const propor = diasPeriodo/30;
+    const salarioProp = e.salario * propor;
+    const auxT = e.salario <= db.cfg.salarioMinimo*db.cfg.topeAuxTransporte ? db.cfg.auxTransporte * propor : 0;
+    const bonifProp = (e.bonificacion||0) * propor;
+    const diasNovedad = diasNoRemuneradosEnPeriodo(db.novedades, e.id, desde, hasta);
+    const descuentoNovedades = (e.salario/30) * diasNovedad;
+    const devengado = Math.max(0, salarioProp + auxT + bonifProp - descuentoNovedades);
+    const ap = aportes(devengado);
+    const deducciones = ap.empleado.salud + ap.empleado.pension;
+    return { emp:e, diasPeriodo, salarioProp, auxT, bonifProp, diasNovedad, descuentoNovedades,
+      devengado, ap, deducciones, neto: devengado-deducciones };
+  }), [administrativos, db.novedades, db.cfg, desde, hasta, diasPeriodo]);
+
+  const totAdmin = calcAdmin.reduce((a,c)=>({
+    devengado:a.devengado+c.devengado, neto:a.neto+c.neto
+  }),{devengado:0,neto:0});
+
   const exportar = () => {
-    if(modo==='basica'){
-      exportCSV('liquidacion_basica_sin_recargos', calc.map(c=>({
-        empleado:c.emp.nombre, cargo:c.emp.cargo, dias:c.dias,
-        horas_totales:fmtNum(c.res.totalEfectivo+c.res.disponibilidadHrs),
-        salario_base:c.emp.salario, valor_hora:Math.round(c.val.valorHoraBase),
-        valor_horas_sin_recargos:Math.round(c.valorHorasBasico), aux_transporte:Math.round(c.auxT),
-        devengado:Math.round(c.devengadoBasico), deducciones:Math.round(c.deduccionesBasico),
-        neto:Math.round(c.netoBasico)})));
-      toast('Nómina básica exportada');
+    if(modo==='admin'){
+      exportCSV('nomina_administrativos', calcAdmin.map(c=>({
+        empleado:c.emp.nombre, cargo:c.emp.cargo, dias_periodo:c.diasPeriodo,
+        salario:Math.round(c.salarioProp), aux_transporte:Math.round(c.auxT), bonificacion:Math.round(c.bonifProp),
+        dias_novedad_no_remunerada:c.diasNovedad, descuento_novedades:Math.round(c.descuentoNovedades),
+        devengado:Math.round(c.devengado), deducciones:Math.round(c.deducciones), neto:Math.round(c.neto)})));
+      toast('Nómina de administrativos exportada');
     } else {
       exportCSV('liquidacion', calc.map(c=>({
         empleado:c.emp.nombre, cargo:c.emp.cargo, dias:c.dias,
@@ -79,7 +100,7 @@ export default function Liquidacion({db, toast}){
 
   return <Page title="Liquidación" sub={`Período ${fmtFecha(desde)} → ${fmtFecha(hasta)} · normativa vigente jul. 2026`}
     actions={<Btn v="outline" icon="download" onClick={exportar}>
-      {modo==='basica' ? 'Exportar nómina básica' : 'Exportar nómina'}</Btn>}>
+      {modo==='admin' ? 'Exportar nómina administrativos' : 'Exportar nómina'}</Btn>}>
 
     <Card className="mb-4">
       <div className="grid sm:grid-cols-4 gap-4 items-end">
@@ -94,74 +115,86 @@ export default function Liquidacion({db, toast}){
     </Card>
 
     <div className="mb-4"><Tabs active={modo} onChange={setModo} tabs={[
-      {id:'completa',label:'Liquidación completa (con recargos)'},
-      {id:'basica',label:'Nómina básica (sin extras ni recargos)'}]}/></div>
+      {id:'completa',label:'Personal operativo (con recargos)',count:operativos.length},
+      {id:'admin',label:'Administrativos (nómina fija)',count:administrativos.length}]}/></div>
 
-    {modo==='basica' && <div className="mb-4 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 ring-1 ring-inset ring-amber-500/20 text-xs text-amber-900 dark:text-amber-200">
-      <b>Solo para consulta/cruce con otro sistema.</b> Esta vista paga todas las horas trabajadas al valor
-      hora simple, sin los recargos por horas extra, nocturnas o dominicales/festivas que exige la ley — el
-      pago real al empleado debe hacerse con la <b>liquidación completa</b>, no con esta.</div>}
+    {modo==='admin' ? <>
+      <div className="mb-4 p-3.5 rounded-xl bg-sky-50 dark:bg-sky-500/10 ring-1 ring-inset ring-sky-500/20 text-xs text-sky-900 dark:text-sky-200">
+        <b>Nómina fija.</b> Salario + auxilio de transporte + bonificación − 4% EPS − 4% pensión, prorateados
+        al período. No depende de marcaciones (los administrativos no marcan con QR) — descansan sábados,
+        domingos y festivos por horario preestablecido. Las novedades no remuneradas (ausencias, permisos no
+        remunerados, llamados de atención) descuentan el día proporcional.</div>
 
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-      <Stat label="Horas efectivas" value={fmtNum(tot.horas,0)} icon="clock" tone="emerald" sub={`+ ${fmtNum(tot.disp,0)} h disponibilidad`}/>
-      <Stat label="Total devengado" value={fmtCOP(tot.devengado)} icon="money" tone="brand" sub={`${calc.length} empleados`}/>
-      <Stat label="Neto a pagar" value={fmtCOP(tot.neto)} icon="check" tone="violet" sub="Después de deducciones"/>
-      <Stat label="Costo total empresa" value={fmtCOP(tot.costoEmpresa)} icon="chart" tone="amber" sub="Incl. aportes y prestaciones"/>
-    </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <Stat label="Administrativos" value={administrativos.length} icon="users" tone="sky"/>
+        <Stat label="Días del período" value={diasPeriodo} icon="calendar" tone="brand"/>
+        <Stat label="Total devengado" value={fmtCOP(totAdmin.devengado)} icon="money" tone="violet"/>
+        <Stat label="Neto a pagar" value={fmtCOP(totAdmin.neto)} icon="check" tone="emerald"/>
+      </div>
 
-    {modo==='completa' ? <Card pad={false}>
-      <Table head={['Empleado','Días','H. efectivas','H. disponib.','Valor horas','Disponib.','Aux. transp.','Devengado','Deducc.','Neto','']}>
-        {calc.map(c => (
-          <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
-            <Td><div className="flex items-center gap-2.5"><Avatar nombre={c.emp.nombre} size="w-8 h-8"/>
-              <div className="min-w-0"><p className="font-bold truncate">{c.emp.nombre.split(' ').slice(0,2).join(' ')}</p>
-                <p className="text-[11px] text-ink-400">{c.emp.cargo}</p></div></div></Td>
-            <Td className="num">{c.dias}</Td>
-            <Td className="num font-semibold">{fmtNum(c.res.totalEfectivo)}</Td>
-            <Td className="num text-amber-600 font-semibold">{fmtNum(c.res.disponibilidadHrs)}</Td>
-            <Td className="num text-xs">{fmtCOP(c.val.subtotal)}</Td>
-            <Td className="num text-xs">{fmtCOP(c.val.disponibilidad.total)}</Td>
-            <Td className="num text-xs">{c.auxT>0?fmtCOP(c.auxT):'—'}</Td>
-            <Td className="num font-bold">{fmtCOP(c.devengado)}</Td>
-            <Td className="num text-xs text-rose-600">−{fmtCOP(c.deducciones)}</Td>
-            <Td className="num font-extrabold text-emerald-700 dark:text-emerald-400">{fmtCOP(c.neto)}</Td>
-            <Td className="text-right"><Btn v="soft" s="sm" onClick={()=>setSel(c)}>Detalle</Btn></Td>
-          </tr>))}
-        <tr className="bg-ink-50 dark:bg-ink-950/60 font-extrabold">
-          <Td className="font-extrabold">TOTAL</Td><Td/>
-          <Td className="num">{fmtNum(tot.horas)}</Td><Td className="num">{fmtNum(tot.disp)}</Td>
-          <Td/><Td/><Td/>
-          <Td className="num">{fmtCOP(tot.devengado)}</Td><Td/>
-          <Td className="num text-emerald-700 dark:text-emerald-400">{fmtCOP(tot.neto)}</Td><Td/>
-        </tr>
-      </Table>
-    </Card> : <Card pad={false}>
-      <Table head={['Empleado','Días','Horas totales','Valor hora','Valor horas','Aux. transp.','Devengado','Deducc.','Neto']}>
-        {calc.map(c => (
-          <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
-            <Td><div className="flex items-center gap-2.5"><Avatar nombre={c.emp.nombre} size="w-8 h-8"/>
-              <div className="min-w-0"><p className="font-bold truncate">{c.emp.nombre.split(' ').slice(0,2).join(' ')}</p>
-                <p className="text-[11px] text-ink-400">{c.emp.cargo}</p></div></div></Td>
-            <Td className="num">{c.dias}</Td>
-            <Td className="num font-semibold">{fmtNum(c.res.totalEfectivo+c.res.disponibilidadHrs)}</Td>
-            <Td className="num text-xs">{fmtCOP(c.val.valorHoraBase)}</Td>
-            <Td className="num text-xs">{fmtCOP(c.valorHorasBasico)}</Td>
-            <Td className="num text-xs">{c.auxT>0?fmtCOP(c.auxT):'—'}</Td>
-            <Td className="num font-bold">{fmtCOP(c.devengadoBasico)}</Td>
-            <Td className="num text-xs text-rose-600">−{fmtCOP(c.deduccionesBasico)}</Td>
-            <Td className="num font-extrabold text-emerald-700 dark:text-emerald-400">{fmtCOP(c.netoBasico)}</Td>
-          </tr>))}
-        <tr className="bg-ink-50 dark:bg-ink-950/60 font-extrabold">
-          <Td className="font-extrabold">TOTAL</Td><Td/>
-          <Td className="num">{fmtNum(tot.horas+tot.disp)}</Td>
-          <Td/><Td/><Td/>
-          <Td className="num">{fmtCOP(tot.devengado)}</Td><Td/>
-          <Td className="num text-emerald-700 dark:text-emerald-400">{fmtCOP(tot.neto)}</Td>
-        </tr>
-      </Table>
-    </Card>}
+      <Card pad={false}>
+        {administrativos.length===0
+          ? <div className="p-8 text-center text-sm text-ink-500">No hay empleados con cargo "Administrativo" activos.</div>
+          : <Table head={['Empleado','Salario','Aux. transp.','Bonificación','Días novedad','Descuento','Devengado','Deducc.','Neto']}>
+            {calcAdmin.map(c => (
+              <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
+                <Td><div className="flex items-center gap-2.5"><Avatar nombre={c.emp.nombre} size="w-8 h-8"/>
+                  <div className="min-w-0"><p className="font-bold truncate">{c.emp.nombre.split(' ').slice(0,2).join(' ')}</p>
+                    <p className="text-[11px] text-ink-400">{c.emp.cargo}</p></div></div></Td>
+                <Td className="num text-xs">{fmtCOP(c.salarioProp)}</Td>
+                <Td className="num text-xs">{c.auxT>0?fmtCOP(c.auxT):'—'}</Td>
+                <Td className="num text-xs">{c.bonifProp>0?fmtCOP(c.bonifProp):'—'}</Td>
+                <Td className="num">{c.diasNovedad>0?<Badge tone="amber">{c.diasNovedad}</Badge>:'—'}</Td>
+                <Td className="num text-xs text-rose-600">{c.descuentoNovedades>0?`−${fmtCOP(c.descuentoNovedades)}`:'—'}</Td>
+                <Td className="num font-bold">{fmtCOP(c.devengado)}</Td>
+                <Td className="num text-xs text-rose-600">−{fmtCOP(c.deducciones)}</Td>
+                <Td className="num font-extrabold text-emerald-700 dark:text-emerald-400">{fmtCOP(c.neto)}</Td>
+              </tr>))}
+            <tr className="bg-ink-50 dark:bg-ink-950/60 font-extrabold">
+              <Td className="font-extrabold">TOTAL</Td><Td/><Td/><Td/><Td/><Td/>
+              <Td className="num">{fmtCOP(totAdmin.devengado)}</Td><Td/>
+              <Td className="num text-emerald-700 dark:text-emerald-400">{fmtCOP(totAdmin.neto)}</Td>
+            </tr>
+          </Table>}
+      </Card>
+    </> : <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <Stat label="Horas efectivas" value={fmtNum(tot.horas,0)} icon="clock" tone="emerald" sub={`+ ${fmtNum(tot.disp,0)} h disponibilidad`}/>
+        <Stat label="Total devengado" value={fmtCOP(tot.devengado)} icon="money" tone="brand" sub={`${calc.length} empleados`}/>
+        <Stat label="Neto a pagar" value={fmtCOP(tot.neto)} icon="check" tone="violet" sub="Después de deducciones"/>
+        <Stat label="Costo total empresa" value={fmtCOP(tot.costoEmpresa)} icon="chart" tone="amber" sub="Incl. aportes y prestaciones"/>
+      </div>
 
-    {/* Detalle de liquidación */}
+      <Card pad={false}>
+        <Table head={['Empleado','Días','H. efectivas','H. disponib.','Valor horas','Disponib.','Aux. transp.','Devengado','Deducc.','Neto','']}>
+          {calc.map(c => (
+            <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
+              <Td><div className="flex items-center gap-2.5"><Avatar nombre={c.emp.nombre} size="w-8 h-8"/>
+                <div className="min-w-0"><p className="font-bold truncate">{c.emp.nombre.split(' ').slice(0,2).join(' ')}</p>
+                  <p className="text-[11px] text-ink-400">{c.emp.cargo}</p></div></div></Td>
+              <Td className="num">{c.dias}</Td>
+              <Td className="num font-semibold">{fmtNum(c.res.totalEfectivo)}</Td>
+              <Td className="num text-amber-600 font-semibold">{fmtNum(c.res.disponibilidadHrs)}</Td>
+              <Td className="num text-xs">{fmtCOP(c.val.subtotal)}</Td>
+              <Td className="num text-xs">{fmtCOP(c.val.disponibilidad.total)}</Td>
+              <Td className="num text-xs">{c.auxT>0?fmtCOP(c.auxT):'—'}</Td>
+              <Td className="num font-bold">{fmtCOP(c.devengado)}</Td>
+              <Td className="num text-xs text-rose-600">−{fmtCOP(c.deducciones)}</Td>
+              <Td className="num font-extrabold text-emerald-700 dark:text-emerald-400">{fmtCOP(c.neto)}</Td>
+              <Td className="text-right"><Btn v="soft" s="sm" onClick={()=>setSel(c)}>Detalle</Btn></Td>
+            </tr>))}
+          <tr className="bg-ink-50 dark:bg-ink-950/60 font-extrabold">
+            <Td className="font-extrabold">TOTAL</Td><Td/>
+            <Td className="num">{fmtNum(tot.horas)}</Td><Td className="num">{fmtNum(tot.disp)}</Td>
+            <Td/><Td/><Td/>
+            <Td className="num">{fmtCOP(tot.devengado)}</Td><Td/>
+            <Td className="num text-emerald-700 dark:text-emerald-400">{fmtCOP(tot.neto)}</Td><Td/>
+          </tr>
+        </Table>
+      </Card>
+    </>}
+
+    {/* Detalle de liquidación (solo personal operativo) */}
     <Modal open={!!sel} onClose={()=>setSel(null)} w="max-w-3xl"
       title="Desprendible de liquidación" sub={sel && `${sel.emp.nombre} · ${fmtFecha(desde)} → ${fmtFecha(hasta)}`}>
       {sel && <div className="space-y-5">

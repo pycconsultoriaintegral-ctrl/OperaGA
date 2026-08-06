@@ -14,7 +14,7 @@ export default function Empleados({db, set, toast}){
     (!fc || e.cargo===fc)), [db.empleados,q,fc]);
 
   const vacio = () => ({ id:uid(), nombre:'', doc:'', tipoDoc:'CC', cargo:'Mucama', nacimiento:'', tel:'', email:'',
-    dir:'', ingreso:hoy(), contrato:'Término indefinido', salario:CONFIG_DEFAULT.salarioMinimo,
+    dir:'', ingreso:hoy(), contrato:'Término indefinido', salario:CONFIG_DEFAULT.salarioMinimo, bonificacion:0,
     eps:'Sura', afp:'Porvenir', arl:'Sura ARL', banco:'', cuenta:'', contactoEmg:'', estado:'ACTIVO', interno:false, foto:null });
 
   const guardar = () => {
@@ -105,7 +105,8 @@ export default function Empleados({db, set, toast}){
         {[['Datos personales',[['Fecha de nacimiento',fmtFecha(sel.nacimiento)],['Edad',edad(sel.nacimiento)+' años'],
             ['Teléfono',sel.tel],['Correo',sel.email],['Dirección',sel.dir],['Contacto de emergencia',sel.contactoEmg]]],
           ['Vínculo laboral',[['Cargo',sel.cargo],['Tipo de contrato',sel.contrato],['Fecha de ingreso',fmtFecha(sel.ingreso)],
-            ['Salario básico',fmtCOP(sel.salario)],['Valor hora',fmtCOP(sel.salario/db.cfg.divisorHora)],
+            ['Salario básico',fmtCOP(sel.salario)],['Bonificación',fmtCOP(sel.bonificacion)],
+            ['Valor hora',fmtCOP(sel.salario/db.cfg.divisorHora)],
             ['Modalidad',sel.interno?'Interno (alojado en propiedad)':'Externo']]],
           ['Seguridad social',[['EPS',sel.eps],['Fondo de pensiones',sel.afp],['ARL',sel.arl],
             ['Banco',sel.banco||'—'],['Cuenta',sel.cuenta||'—']]]
@@ -157,6 +158,8 @@ export default function Empleados({db, set, toast}){
             <Field label="Fecha de ingreso"><Input type="date" value={edit.ingreso} onChange={e=>u('ingreso',e.target.value)}/></Field>
             <Field label="Salario básico mensual" hint={`Valor hora: ${fmtCOP(edit.salario/db.cfg.divisorHora)}`}>
               <Input type="number" value={edit.salario} onChange={e=>u('salario',+e.target.value)}/></Field>
+            <Field label="Bonificación mensual fija" hint="Se usa en la nómina básica de administrativos">
+              <Input type="number" value={edit.bonificacion} onChange={e=>u('bonificacion',+e.target.value)}/></Field>
             <Field label="Estado"><Select value={edit.estado} onChange={e=>u('estado',e.target.value)} options={['ACTIVO','INACTIVO']}/></Field>
             <Field label="Modalidad" hint="Los internos permanecen alojados en la propiedad">
               <Select value={edit.interno?'si':'no'} onChange={e=>u('interno',e.target.value==='si')}

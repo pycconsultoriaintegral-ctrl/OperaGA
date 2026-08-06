@@ -16,14 +16,16 @@ export const TABLAS = {
     fromRow: r => ({
       id: r.id, nombre: r.nombre, doc: r.doc, tipoDoc: r.tipo_doc, cargo: r.cargo,
       nacimiento: r.nacimiento, tel: r.tel, email: r.email, dir: r.dir, ingreso: r.ingreso,
-      contrato: r.contrato, salario: num(r.salario), eps: r.eps, afp: r.afp, arl: r.arl,
+      contrato: r.contrato, salario: num(r.salario), bonificacion: num(r.bonificacion) || 0,
+      eps: r.eps, afp: r.afp, arl: r.arl,
       banco: r.banco, cuenta: r.cuenta, contactoEmg: r.contacto_emg, estado: r.estado,
       interno: !!r.interno, foto: r.foto_url
     }),
     toRow: o => ({
       nombre: o.nombre, doc: o.doc, tipo_doc: o.tipoDoc, cargo: o.cargo,
       nacimiento: o.nacimiento || null, tel: o.tel, email: o.email, dir: o.dir,
-      ingreso: o.ingreso, contrato: o.contrato, salario: o.salario, eps: o.eps, afp: o.afp,
+      ingreso: o.ingreso, contrato: o.contrato, salario: o.salario, bonificacion: o.bonificacion||0,
+      eps: o.eps, afp: o.afp,
       arl: o.arl, banco: o.banco, cuenta: o.cuenta, contacto_emg: o.contactoEmg,
       estado: o.estado, interno: !!o.interno, foto_url: o.foto || null
     })
