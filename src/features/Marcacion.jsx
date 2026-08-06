@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Page, Card, Tabs, Field, Select, Input, Btn, Modal, Table, Td, Badge, Avatar, Empty, Icon, TONE, Bar, exportCSV } from '../components/ui.jsx';
 import { TIPOS_TIEMPO, METODOS, VALIDACION } from '../lib/constants.js';
-import { uid, pad, fmtFecha } from '../lib/utils.js';
+import { uid, pad, fmtFecha, hoy } from '../lib/utils.js';
 import { validarMarcacion, distanciaMt } from '../lib/geo.js';
 
 export default function Marcacion({db, set, toast}){
@@ -90,22 +90,36 @@ export default function Marcacion({db, set, toast}){
       { lat:geo?.lat, lng:geo?.lng, codigo, ip, foto }, propiedad, db.cfg);
   }, [propiedad, geo, codigo, ip, foto, db.cfg]);
 
+  // Si ya existe una marcación de hoy para este empleado/propiedad/tipo sin
+  // cerrar (entrada === salida, la marca de "recién abierta"), el siguiente
+  // escaneo se toma como su SALIDA en vez de crear un registro nuevo.
+  const abierta = useMemo(() => {
+    if(!emp || !prop) return null;
+    const hoyStr = hoy();
+    return db.asistencia.find(r => r.empleado===emp && r.propiedad===prop && r.tipo===tipo
+      && r.fecha===hoyStr && r.entrada===r.salida) || null;
+  }, [db.asistencia, emp, prop, tipo]);
+
   const registrar = () => {
     if(!emp)  return toast('Selecciona el empleado','rose');
     if(!prop) return toast('Selecciona la propiedad','rose');
     if(validacion?.bloqueante) return toast('Marcación bloqueada: ' + validacion.avisos[0],'rose');
     const ahora = new Date();
     const hm = `${pad(ahora.getHours())}:${pad(ahora.getMinutes())}`;
+    const metodo = geo?.lat ? 'GPS' : (codigo ? 'QR' : 'MANUAL');
     set(d => ({ ...d,
-      asistencia: [...d.asistencia, { id:uid(), empleado:emp, propiedad:prop, fecha:'2026-07-24',
-        tipo, entrada:hm, salida:hm, metodo: geo?.lat ? 'GPS' : (codigo ? 'QR' : 'MANUAL'),
-        obs:'Marcación desde kiosco', lat:geo?.lat??null, lng:geo?.lng??null, ip,
-        validacion: validacion?.estado || 'MANUAL', foto }],
+      asistencia: abierta
+        ? d.asistencia.map(r => r.id===abierta.id ? { ...r, salida:hm, metodo, foto: foto||r.foto } : r)
+        : [...d.asistencia, { id:uid(), empleado:emp, propiedad:prop, fecha:hoy(),
+            tipo, entrada:hm, salida:hm, metodo,
+            obs:'Marcación desde kiosco', lat:geo?.lat??null, lng:geo?.lng??null, ip,
+            validacion: validacion?.estado || 'MANUAL', foto }],
       auditoria: [{ id:uid(), fecha:new Date().toISOString().slice(0,16).replace('T',' '),
-        usuario: empleado?.nombre || '—', accion:'MARCAR', entidad:`Asistencia ${propiedad?.nombre}`,
-        detalle:`${TIPOS_TIEMPO[tipo].label} · ${hm} · ${VALIDACION[validacion?.estado||'MANUAL'].label}` }, ...d.auditoria]
+        usuario: empleado?.nombre || '—', accion: abierta?'MARCAR_SALIDA':'MARCAR_ENTRADA',
+        entidad:`Asistencia ${propiedad?.nombre}`,
+        detalle:`${TIPOS_TIEMPO[tipo].label} · ${abierta?'Salida':'Entrada'} ${hm} · ${VALIDACION[validacion?.estado||'MANUAL'].label}` }, ...d.auditoria]
     }));
-    toast('Marcación registrada · ' + hm);
+    toast((abierta?'Salida registrada · ':'Entrada registrada · ') + hm);
     setFoto(null); setCodigo('');
   };
 
@@ -186,8 +200,13 @@ export default function Marcacion({db, set, toast}){
           <img src={foto} alt="Captura" className="w-20 h-15 rounded-lg object-cover"/>
           <p className="text-xs text-ink-500">Fotografía adjunta a la marcación</p></div>}
 
-        <div className="mt-5"><Btn s="lg" className="w-full" icon="check" onClick={registrar}
-          disabled={!emp||!prop||validacion?.bloqueante}>Registrar marcación</Btn></div>
+        {emp && prop && <p className="mt-4 text-center text-xs font-semibold text-ink-500">
+          {abierta
+            ? <>Ya hay una entrada abierta hoy a las <b className="text-ink-800 dark:text-ink-100">{abierta.entrada}</b> — este botón registra la <b>salida</b>.</>
+            : <>Este botón registra la <b>entrada</b>. Vuelve a escanear el QR al terminar el turno para registrar la salida.</>}
+        </p>}
+        <div className="mt-2"><Btn s="lg" className="w-full" icon="check" onClick={registrar}
+          disabled={!emp||!prop||validacion?.bloqueante}>{abierta?'Registrar salida':'Registrar entrada'}</Btn></div>
       </Card>
 
       {/* Panel de validación */}

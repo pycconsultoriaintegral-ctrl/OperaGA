@@ -1,11 +1,20 @@
 import { useState, useMemo } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Stat, Icon, exportCSV } from '../components/ui.jsx';
 import { liquidar, valorizar, prestaciones, aportes } from '../lib/payroll.js';
-import { fmtCOP, fmtNum, fmtFecha } from '../lib/utils.js';
+import { fmtCOP, fmtNum, fmtFecha, hoy, pad } from '../lib/utils.js';
+
+// Límites del mes en curso, para los atajos de período y los valores por defecto.
+function mesActual(){
+  const [anio,mes] = hoy().split('-').map(Number);
+  const ultimoDia = new Date(anio, mes, 0).getDate();
+  const f = d => `${anio}-${pad(mes)}-${pad(d)}`;
+  return { primero:f(1), quince:f(15), dieciseis:f(16), ultimo:f(ultimoDia) };
+}
 
 export default function Liquidacion({db, toast}){
-  const [desde,setDesde] = useState('2026-07-01');
-  const [hasta,setHasta] = useState('2026-07-24');
+  const m = mesActual();
+  const [desde,setDesde] = useState(m.primero);
+  const [hasta,setHasta] = useState(hoy());
   const [sel,setSel] = useState(null);
 
   const calc = useMemo(() => db.empleados.filter(e=>e.estado==='ACTIVO').map(e => {
@@ -43,9 +52,9 @@ export default function Liquidacion({db, toast}){
         <Field label="Desde"><Input type="date" value={desde} onChange={e=>setDesde(e.target.value)}/></Field>
         <Field label="Hasta"><Input type="date" value={hasta} onChange={e=>setHasta(e.target.value)}/></Field>
         <div className="sm:col-span-2 flex gap-2 flex-wrap">
-          <Btn v="outline" s="sm" onClick={()=>{setDesde('2026-07-01');setHasta('2026-07-15');}}>1.ª quincena jul</Btn>
-          <Btn v="outline" s="sm" onClick={()=>{setDesde('2026-07-16');setHasta('2026-07-31');}}>2.ª quincena jul</Btn>
-          <Btn v="outline" s="sm" onClick={()=>{setDesde('2026-07-01');setHasta('2026-07-31');}}>Mes completo</Btn>
+          <Btn v="outline" s="sm" onClick={()=>{setDesde(m.primero);setHasta(m.quince);}}>1.ª quincena</Btn>
+          <Btn v="outline" s="sm" onClick={()=>{setDesde(m.dieciseis);setHasta(m.ultimo);}}>2.ª quincena</Btn>
+          <Btn v="outline" s="sm" onClick={()=>{setDesde(m.primero);setHasta(m.ultimo);}}>Mes completo</Btn>
         </div>
       </div>
     </Card>

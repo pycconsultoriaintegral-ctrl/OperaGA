@@ -6,8 +6,8 @@ import { liquidar, valorizar } from '../lib/payroll.js';
 
 export default function Reportes({db, toast}){
   const [rep,setRep] = useState('horas');
-  const [desde,setDesde] = useState('2026-07-01');
-  const [hasta,setHasta] = useState('2026-07-24');
+  const [desde,setDesde] = useState(addDias(hoy(),-29));
+  const [hasta,setHasta] = useState(hoy());
 
   const data = useMemo(() => {
     const regs = db.asistencia.filter(r=>r.fecha>=desde && r.fecha<=hasta);
@@ -82,9 +82,9 @@ export default function Reportes({db, toast}){
         <Field label="Desde"><Input type="date" value={desde} onChange={e=>setDesde(e.target.value)}/></Field>
         <Field label="Hasta"><Input type="date" value={hasta} onChange={e=>setHasta(e.target.value)}/></Field>
         <div className="sm:col-span-2 flex gap-2 flex-wrap">
-          <Btn v="outline" s="sm" onClick={()=>{setDesde(addDias('2026-07-24',-6));setHasta('2026-07-24');}}>7 días</Btn>
-          <Btn v="outline" s="sm" onClick={()=>{setDesde(addDias('2026-07-24',-29));setHasta('2026-07-24');}}>30 días</Btn>
-          <Btn v="outline" s="sm" onClick={()=>{setDesde('2026-07-01');setHasta('2026-07-31');}}>Julio 2026</Btn>
+          <Btn v="outline" s="sm" onClick={()=>{setDesde(addDias(hoy(),-6));setHasta(hoy());}}>7 días</Btn>
+          <Btn v="outline" s="sm" onClick={()=>{setDesde(addDias(hoy(),-29));setHasta(hoy());}}>30 días</Btn>
+          <Btn v="outline" s="sm" onClick={()=>{setDesde(hoy().slice(0,8)+'01');setHasta(hoy());}}>Mes actual</Btn>
         </div>
       </div>
     </Card>

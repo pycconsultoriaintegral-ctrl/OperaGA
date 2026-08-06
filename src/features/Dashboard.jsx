@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
 import { Page, Card, Stat, Badge, Icon, Bar, Btn, Avatar, exportCSV, TONE } from '../components/ui.jsx';
 import { CARGOS, ESTADOS_PROP, TIPOS_NOVEDAD } from '../lib/constants.js';
-import { addDias, esDomingo, fmtNum, fmtCOP, fmtFechaLarga, fmtFecha, nombreDia } from '../lib/utils.js';
+import { addDias, esDomingo, fmtNum, fmtCOP, fmtFechaLarga, fmtFecha, nombreDia, hoy } from '../lib/utils.js';
 import { liquidar, valorizar } from '../lib/payroll.js';
 
 export default function Dashboard({db, go}){
   const { empleados, propiedades, reservas, asistencia, novedades, cfg, festivos } = db;
-  const HOY = '2026-07-24';
+  const HOY = hoy();
 
   const m = useMemo(() => {
     const ini = addDias(HOY,-29);

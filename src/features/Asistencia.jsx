@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select, Area, Tabs, Empty, Bar, Icon, TONE, exportCSV } from '../components/ui.jsx';
 import { TIPOS_TIEMPO } from '../lib/constants.js';
-import { uid, hm2min, fmtNum, addDias, esDomingo, fmtFechaLarga, fmtFecha, nombreDia } from '../lib/utils.js';
+import { uid, hm2min, fmtNum, addDias, esDomingo, fmtFechaLarga, fmtFecha, nombreDia, hoy } from '../lib/utils.js';
 import { liquidar } from '../lib/payroll.js';
 
 export default function Asistencia({db, set, toast}){
-  const [fecha,setFecha] = useState('2026-07-24');
+  const [fecha,setFecha] = useState(hoy());
   const [emp,setEmp] = useState('');
   const [edit,setEdit] = useState(null);
   const [tab,setTab] = useState('dia');
@@ -60,7 +60,7 @@ export default function Asistencia({db, set, toast}){
           options={[{v:'',l:'Todos'},...activos.map(e=>({v:e.id,l:e.nombre}))]}/></Field>
         <div className="sm:col-span-2 flex gap-2 flex-wrap">
           <Btn v="outline" s="sm" onClick={()=>setFecha(addDias(fecha,-1))} icon="chevL">Anterior</Btn>
-          <Btn v="outline" s="sm" onClick={()=>setFecha('2026-07-24')}>Hoy</Btn>
+          <Btn v="outline" s="sm" onClick={()=>setFecha(hoy())}>Hoy</Btn>
           <Btn v="outline" s="sm" onClick={()=>setFecha(addDias(fecha,1))}>Siguiente</Btn>
         </div>
       </div>

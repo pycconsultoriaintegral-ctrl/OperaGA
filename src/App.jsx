@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Icon, Avatar, useToast } from './components/ui.jsx';
 import { useRemoteDB } from './data/useRemoteDB.js';
 import { calcularCompensatorios } from './lib/payroll.js';
-import { fmtFechaLarga } from './lib/utils.js';
+import { fmtFechaLarga, hoy } from './lib/utils.js';
 import { useAuth } from './auth/AuthProvider.jsx';
 import { usePermisos } from './auth/usePermisos.js';
 import Login from './auth/Login.jsx';
@@ -186,7 +186,7 @@ function AppShell({ perfil, rol, has, onLogout }){
           <div className="ml-auto flex items-center gap-2">
             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-ink-100 dark:bg-ink-800">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/>
-              <span className="text-[11px] font-bold text-ink-600 dark:text-ink-300">{fmtFechaLarga('2026-07-24')}</span></div>
+              <span className="text-[11px] font-bold text-ink-600 dark:text-ink-300">{fmtFechaLarga(hoy())}</span></div>
             {badges.novedades>0 && <button onClick={()=>go('novedades')} title="Novedades pendientes"
               className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800">
               <Icon n="bell" c="w-5 h-5"/>
