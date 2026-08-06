@@ -43,7 +43,8 @@ export default function Asistencia({db, set, toast}){
   }),[db,fecha]);
   const max7 = Math.max(...serie7.map(s=>s.ef+s.di),1);
 
-  const durMin = r => { let d = hm2min(r.salida)-hm2min(r.entrada); return d<=0 ? d+1440 : d; };
+  const durMin = r => { if(r.entrada===r.salida) return 0;  // marcación abierta, sin salida todavía
+    let d = hm2min(r.salida)-hm2min(r.entrada); return d<=0 ? d+1440 : d; };
 
   return <Page title="Asistencia" sub="Registro y control de marcaciones con tipología de tiempos"
     actions={<><Btn v="outline" icon="download" onClick={()=>exportCSV('asistencia', db.asistencia.map(r=>({
@@ -121,8 +122,10 @@ export default function Asistencia({db, set, toast}){
               <span className="font-semibold">{e?.nombre.split(' ').slice(0,2).join(' ')}</span></div></Td>
             <Td><Badge tone={t?.color} dot>{t?.label}</Badge></Td>
             <Td className="num font-bold">{r.entrada}</Td>
-            <Td className="num font-bold">{r.salida}</Td>
-            <Td className="num">{fmtNum(durMin(r)/60)} h</Td>
+            <Td className="num font-bold">{r.entrada===r.salida ? '—' : r.salida}</Td>
+            <Td className="num">{r.entrada===r.salida
+              ? <Badge tone="amber" dot>Abierta</Badge>
+              : `${fmtNum(durMin(r)/60)} h`}</Td>
             <Td className="text-xs">{p?.nombre||'—'}</Td>
             <Td><Badge tone="slate">{r.metodo}</Badge></Td>
             <Td className="text-right whitespace-nowrap">

@@ -50,7 +50,8 @@ export function liquidar(registros, cfg, festivos){
 
     regs.forEach(r => {
       let ini = hm2min(r.entrada), fin = hm2min(r.salida);
-      if(fin <= ini) fin += 1440;                // turno que cruza medianoche
+      if(ini === fin) return;                    // marcación abierta (sin salida todavía): no cuenta horas
+      if(fin < ini) fin += 1440;                  // turno que cruza medianoche
       const dur = fin - ini;
       if(dur <= 0) return;
 

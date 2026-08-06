@@ -40,6 +40,12 @@ describe('liquidar', () => {
     expect(res.horas.ordDiurna).toBeCloseTo(0, 5);
   });
 
+  it('una marcación abierta (entrada === salida, sin cerrar todavía) no cuenta como 24h trabajadas', () => {
+    const regs = [{ fecha:'2023-01-02', tipo:'EFECTIVO', entrada:'11:48', salida:'11:48' }];
+    const res = liquidar(regs, cfg, []);
+    expect(res.totalEfectivo).toBe(0);
+  });
+
   it('combina extra + dominical + nocturna en el bucket extraDomNocturna', () => {
     const regs = [
       { fecha:'2023-01-01', tipo:'EFECTIVO', entrada:'08:00', salida:'16:00' }, // 8h ordinarias dominicales
