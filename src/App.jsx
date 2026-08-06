@@ -65,7 +65,10 @@ function Pantalla({ msg, children }){
 }
 
 function AppShell({ perfil, rol, has, onLogout }){
-  const [vista,setVista] = useState('dashboard');
+  // Si el enlace trae ?marcar=CODIGO (viene de escanear el QR fijo de una
+  // propiedad), abre directo en Marcación en vez del Panel de control.
+  const [vista,setVista] = useState(() =>
+    new URLSearchParams(window.location.search).get('marcar') ? 'marcacion' : 'dashboard');
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();

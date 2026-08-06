@@ -44,6 +44,18 @@ export default function Marcacion({db, set, toast}){
     return () => { vivo = false; };
   }, []);
 
+  // ── Al escanear el QR fijo de una propiedad, la URL trae ?marcar=CODIGO ──
+  // Precarga esa propiedad y el código, y pide la ubicación de una vez.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cod = params.get('marcar');
+    if(!cod) return;
+    const p = db.propiedades.find(x => x.codigo === cod.toUpperCase());
+    if(p){ setProp(p.id); setCodigo(p.codigo); setTab('kiosco'); pedirGeo(); }
+    else toast(`No existe ninguna propiedad con el código "${cod}"`, 'rose');
+    window.history.replaceState({}, '', window.location.pathname);
+  }, [db.propiedades]);
+
   // ── Cámara ──
   const abrirCamara = async () => {
     try{
@@ -67,7 +79,7 @@ export default function Marcacion({db, set, toast}){
     if(!qrProp || !qrRef.current || !window.QRCode) return;
     qrRef.current.innerHTML = '';
     new window.QRCode(qrRef.current, {
-      text: `OPERA:${qrProp.codigo}`, width:190, height:190,
+      text: `${window.location.origin}/?marcar=${encodeURIComponent(qrProp.codigo)}`, width:190, height:190,
       correctLevel: window.QRCode.CorrectLevel.H });
   }, [qrProp]);
 
