@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Stat, Icon, exportCSV } from '../components/ui.jsx';
+import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Stat, Icon, Tabs, exportCSV } from '../components/ui.jsx';
 import { liquidar, valorizar, prestaciones, aportes } from '../lib/payroll.js';
 import { fmtCOP, fmtNum, fmtFecha, hoy, pad } from '../lib/utils.js';
 
@@ -16,6 +16,7 @@ export default function Liquidacion({db, toast}){
   const [desde,setDesde] = useState(m.primero);
   const [hasta,setHasta] = useState(hoy());
   const [sel,setSel] = useState(null);
+  const [modo,setModo] = useState('completa'); // 'completa' | 'basica' (sin horas extras ni recargos)
 
   const calc = useMemo(() => db.empleados.filter(e=>e.estado==='ACTIVO').map(e => {
     const regs = db.asistencia.filter(r=>r.empleado===e.id && r.fecha>=desde && r.fecha<=hasta);
@@ -28,24 +29,57 @@ export default function Liquidacion({db, toast}){
       ? db.cfg.auxTransporte * dias/30 : 0;
     const devengado = val.total + auxT;
     const deducciones = ap.empleado.salud + ap.empleado.pension;
+
+    // Nómina básica: todas las horas efectivas al valor hora simple, sin
+    // aplicar los factores de recargo (extra/nocturno/dominical). La
+    // disponibilidad se mantiene igual — no es un recargo, es otra tarifa.
+    const valorHorasBasico = res.totalEfectivo * val.valorHoraBase;
+    const devengadoBasico = valorHorasBasico + val.disponibilidad.total + auxT;
+    const apBasico = aportes(devengadoBasico);
+    const prestBasico = prestaciones(devengadoBasico, dias, db.cfg);
+    const deduccionesBasico = apBasico.empleado.salud + apBasico.empleado.pension;
+    const netoBasico = devengadoBasico - deduccionesBasico;
+    const costoEmpresaBasico = devengadoBasico
+      + Object.values(apBasico.empleador).reduce((a,b)=>a+b,0)
+      + Object.values(prestBasico).reduce((a,b)=>a+b,0);
+
     return { emp:e, res, val, dias, prest, ap, auxT, devengado, deducciones, neto: devengado-deducciones,
-      costoEmpresa: devengado + Object.values(ap.empleador).reduce((a,b)=>a+b,0) + Object.values(prest).reduce((a,b)=>a+b,0) };
+      costoEmpresa: devengado + Object.values(ap.empleador).reduce((a,b)=>a+b,0) + Object.values(prest).reduce((a,b)=>a+b,0),
+      valorHorasBasico, devengadoBasico, deduccionesBasico, netoBasico, costoEmpresaBasico };
   }), [db,desde,hasta]);
 
   const tot = calc.reduce((a,c)=>({
     horas:a.horas+c.res.totalEfectivo, disp:a.disp+c.res.disponibilidadHrs,
-    devengado:a.devengado+c.devengado, neto:a.neto+c.neto, costo:a.costoEmpresa+c.costoEmpresa,
-    costoEmpresa:a.costoEmpresa+c.costoEmpresa
-  }),{horas:0,disp:0,devengado:0,neto:0,costo:0,costoEmpresa:0});
+    devengado:a.devengado+(modo==='basica'?c.devengadoBasico:c.devengado),
+    neto:a.neto+(modo==='basica'?c.netoBasico:c.neto),
+    costoEmpresa:a.costoEmpresa+(modo==='basica'?c.costoEmpresaBasico:c.costoEmpresa)
+  }),{horas:0,disp:0,devengado:0,neto:0,costoEmpresa:0});
+
+  const exportar = () => {
+    if(modo==='basica'){
+      exportCSV('liquidacion_basica_sin_recargos', calc.map(c=>({
+        empleado:c.emp.nombre, cargo:c.emp.cargo, dias:c.dias,
+        horas_totales:fmtNum(c.res.totalEfectivo+c.res.disponibilidadHrs),
+        salario_base:c.emp.salario, valor_hora:Math.round(c.val.valorHoraBase),
+        valor_horas_sin_recargos:Math.round(c.valorHorasBasico), aux_transporte:Math.round(c.auxT),
+        devengado:Math.round(c.devengadoBasico), deducciones:Math.round(c.deduccionesBasico),
+        neto:Math.round(c.netoBasico)})));
+      toast('Nómina básica exportada');
+    } else {
+      exportCSV('liquidacion', calc.map(c=>({
+        empleado:c.emp.nombre, cargo:c.emp.cargo, dias:c.dias,
+        horas_efectivas:fmtNum(c.res.totalEfectivo), horas_disponibilidad:fmtNum(c.res.disponibilidadHrs),
+        salario_base:c.emp.salario, valor_horas:Math.round(c.val.subtotal),
+        valor_disponibilidad:Math.round(c.val.disponibilidad.total), aux_transporte:Math.round(c.auxT),
+        devengado:Math.round(c.devengado), deducciones:Math.round(c.deducciones), neto:Math.round(c.neto),
+        costo_total_empresa:Math.round(c.costoEmpresa)})));
+      toast('Liquidación exportada');
+    }
+  };
 
   return <Page title="Liquidación" sub={`Período ${fmtFecha(desde)} → ${fmtFecha(hasta)} · normativa vigente jul. 2026`}
-    actions={<Btn v="outline" icon="download" onClick={()=>{exportCSV('liquidacion', calc.map(c=>({
-      empleado:c.emp.nombre, cargo:c.emp.cargo, dias:c.dias,
-      horas_efectivas:fmtNum(c.res.totalEfectivo), horas_disponibilidad:fmtNum(c.res.disponibilidadHrs),
-      salario_base:c.emp.salario, valor_horas:Math.round(c.val.subtotal),
-      valor_disponibilidad:Math.round(c.val.disponibilidad.total), aux_transporte:Math.round(c.auxT),
-      devengado:Math.round(c.devengado), deducciones:Math.round(c.deducciones), neto:Math.round(c.neto),
-      costo_total_empresa:Math.round(c.costoEmpresa)}))); toast('Liquidación exportada');}}>Exportar nómina</Btn>}>
+    actions={<Btn v="outline" icon="download" onClick={exportar}>
+      {modo==='basica' ? 'Exportar nómina básica' : 'Exportar nómina'}</Btn>}>
 
     <Card className="mb-4">
       <div className="grid sm:grid-cols-4 gap-4 items-end">
@@ -59,6 +93,15 @@ export default function Liquidacion({db, toast}){
       </div>
     </Card>
 
+    <div className="mb-4"><Tabs active={modo} onChange={setModo} tabs={[
+      {id:'completa',label:'Liquidación completa (con recargos)'},
+      {id:'basica',label:'Nómina básica (sin extras ni recargos)'}]}/></div>
+
+    {modo==='basica' && <div className="mb-4 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 ring-1 ring-inset ring-amber-500/20 text-xs text-amber-900 dark:text-amber-200">
+      <b>Solo para consulta/cruce con otro sistema.</b> Esta vista paga todas las horas trabajadas al valor
+      hora simple, sin los recargos por horas extra, nocturnas o dominicales/festivas que exige la ley — el
+      pago real al empleado debe hacerse con la <b>liquidación completa</b>, no con esta.</div>}
+
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
       <Stat label="Horas efectivas" value={fmtNum(tot.horas,0)} icon="clock" tone="emerald" sub={`+ ${fmtNum(tot.disp,0)} h disponibilidad`}/>
       <Stat label="Total devengado" value={fmtCOP(tot.devengado)} icon="money" tone="brand" sub={`${calc.length} empleados`}/>
@@ -66,7 +109,7 @@ export default function Liquidacion({db, toast}){
       <Stat label="Costo total empresa" value={fmtCOP(tot.costoEmpresa)} icon="chart" tone="amber" sub="Incl. aportes y prestaciones"/>
     </div>
 
-    <Card pad={false}>
+    {modo==='completa' ? <Card pad={false}>
       <Table head={['Empleado','Días','H. efectivas','H. disponib.','Valor horas','Disponib.','Aux. transp.','Devengado','Deducc.','Neto','']}>
         {calc.map(c => (
           <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
@@ -92,7 +135,31 @@ export default function Liquidacion({db, toast}){
           <Td className="num text-emerald-700 dark:text-emerald-400">{fmtCOP(tot.neto)}</Td><Td/>
         </tr>
       </Table>
-    </Card>
+    </Card> : <Card pad={false}>
+      <Table head={['Empleado','Días','Horas totales','Valor hora','Valor horas','Aux. transp.','Devengado','Deducc.','Neto']}>
+        {calc.map(c => (
+          <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
+            <Td><div className="flex items-center gap-2.5"><Avatar nombre={c.emp.nombre} size="w-8 h-8"/>
+              <div className="min-w-0"><p className="font-bold truncate">{c.emp.nombre.split(' ').slice(0,2).join(' ')}</p>
+                <p className="text-[11px] text-ink-400">{c.emp.cargo}</p></div></div></Td>
+            <Td className="num">{c.dias}</Td>
+            <Td className="num font-semibold">{fmtNum(c.res.totalEfectivo+c.res.disponibilidadHrs)}</Td>
+            <Td className="num text-xs">{fmtCOP(c.val.valorHoraBase)}</Td>
+            <Td className="num text-xs">{fmtCOP(c.valorHorasBasico)}</Td>
+            <Td className="num text-xs">{c.auxT>0?fmtCOP(c.auxT):'—'}</Td>
+            <Td className="num font-bold">{fmtCOP(c.devengadoBasico)}</Td>
+            <Td className="num text-xs text-rose-600">−{fmtCOP(c.deduccionesBasico)}</Td>
+            <Td className="num font-extrabold text-emerald-700 dark:text-emerald-400">{fmtCOP(c.netoBasico)}</Td>
+          </tr>))}
+        <tr className="bg-ink-50 dark:bg-ink-950/60 font-extrabold">
+          <Td className="font-extrabold">TOTAL</Td><Td/>
+          <Td className="num">{fmtNum(tot.horas+tot.disp)}</Td>
+          <Td/><Td/><Td/>
+          <Td className="num">{fmtCOP(tot.devengado)}</Td><Td/>
+          <Td className="num text-emerald-700 dark:text-emerald-400">{fmtCOP(tot.neto)}</Td>
+        </tr>
+      </Table>
+    </Card>}
 
     {/* Detalle de liquidación */}
     <Modal open={!!sel} onClose={()=>setSel(null)} w="max-w-3xl"
