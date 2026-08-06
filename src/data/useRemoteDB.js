@@ -76,12 +76,16 @@ async function syncTabla(key, prevRows, nextRows){
   }
   const deletes = [...prevMap.keys()].filter(id => !nextMap.has(id));
 
-  if (inserts.length) { const { error } = await supabase.from(table).insert(inserts); if (error) throw error; }
+  // Primero borrar, después insertar: varios módulos (ej. Horarios) "reemplazan"
+  // una fila por otra para la misma llave natural (empleado_id, fecha) — si el
+  // insert corre antes del delete, la fila vieja todavía existe y choca contra
+  // la restricción unique. Con el delete primero nunca coexisten las dos.
+  if (deletes.length) { const { error } = await supabase.from(table).delete().in('id', deletes); if (error) throw error; }
   for (const { id, ...rest } of updates) {
     const { error } = await supabase.from(table).update(rest).eq('id', id);
     if (error) throw error;
   }
-  if (deletes.length) { const { error } = await supabase.from(table).delete().in('id', deletes); if (error) throw error; }
+  if (inserts.length) { const { error } = await supabase.from(table).insert(inserts); if (error) throw error; }
 }
 
 async function syncFestivos(prevFestivos, nextFestivos){
