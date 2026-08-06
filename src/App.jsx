@@ -81,11 +81,16 @@ function AppShell({ perfil, rol, has, onLogout }){
 
   // Solo se muestran en el menú las opciones a las que el rol tiene acceso.
   // Esto es cosmético: la protección real está en las políticas RLS de Supabase.
+  // Excepción: alguien con un empleado vinculado siempre ve Horarios/
+  // Asistencia/Marcación, aunque su rol no tenga el permiso amplio — su
+  // acceso ahí viene de las políticas "propio" (solo sus propias filas).
+  const tienePropio = !!perfil?.empleado_id;
   const navVisible = useMemo(() => NAV.filter(n => {
     if (!n.modulo) return true;
     const modulos = Array.isArray(n.modulo) ? n.modulo : [n.modulo];
+    if (tienePropio && modulos.some(m => ['horarios','asistencia'].includes(m))) return true;
     return modulos.some(m => has(m,'ver'));
-  }), [has]);
+  }), [has, tienePropio]);
 
   useEffect(() => { if (navVisible.length && !navVisible.some(n=>n.id===vista)) go(navVisible[0].id); }, [navVisible]);
 
@@ -104,7 +109,7 @@ function AppShell({ perfil, rol, has, onLogout }){
 
   if (dbLoading || !db) return <Pantalla msg="Cargando datos de la operación…"/>;
 
-  const P = { db, set, toast, go, refrescar };
+  const P = { db, set, toast, go, refrescar, perfil, has };
   const VISTAS = {
     dashboard:   <Dashboard {...P}/>,
     empleados:   <Empleados {...P}/>,

@@ -41,7 +41,7 @@ export default function Configuracion({db, set, toast, refrescar}){
   // ── Usuarios ──
   const [editUser,setEditUser] = useState(null);
   const [guardandoUser,setGuardandoUser] = useState(false);
-  const vacioUser = { email:'', password:'', nombre:'', rol_codigo: db.roles?.[0]?.codigo || '' };
+  const vacioUser = { email:'', password:'', nombre:'', rol_codigo: db.roles?.[0]?.codigo || '', empleado_id:'' };
 
   const llamarAdmin = async (payload) => {
     const { data, error } = await supabase.functions.invoke('admin-usuarios', { body: payload });
@@ -71,6 +71,12 @@ export default function Configuracion({db, set, toast, refrescar}){
     const estado = u2.estado==='ACTIVO' ? 'INACTIVO' : 'ACTIVO';
     try{ await llamarAdmin({ action:'cambiar_estado', user_id:u2.id, estado });
       toast(estado==='ACTIVO'?'Usuario reactivado':'Usuario desactivado'); await refrescar?.(); }
+    catch(e){ toast(e.message,'rose'); }
+  };
+
+  const vincularEmpleado = async (u2, empleado_id) => {
+    try{ await llamarAdmin({ action:'vincular_empleado', user_id:u2.id, empleado_id });
+      toast(empleado_id?'Empleado vinculado':'Vínculo eliminado'); await refrescar?.(); }
     catch(e){ toast(e.message,'rose'); }
   };
 
@@ -348,14 +354,18 @@ export default function Configuracion({db, set, toast, refrescar}){
             <p className="text-xs text-ink-500">Control de acceso por rol</p></div>
           <Btn s="sm" icon="plus" onClick={()=>setEditUser(vacioUser)}>Nuevo usuario</Btn>
         </div>
-        <Table head={['Usuario','Correo','Rol','Estado','']}>
+        <Table head={['Usuario','Correo','Rol','Empleado vinculado','Estado','']}>
           {(db.usuarios||[]).map(u2 => <tr key={u2.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
             <Td><div className="flex items-center gap-2.5"><Avatar nombre={u2.nombre} size="w-8 h-8"/>
               <span className="font-bold">{u2.nombre}</span></div></Td>
             <Td className="text-xs">{u2.email || '—'}</Td>
-            <Td className="w-44">
+            <Td className="w-40">
               <Select value={u2.rolCodigo} onChange={e=>cambiarRolUsuario(u2, e.target.value)}
                 options={(db.roles||[]).map(r=>({v:r.codigo, l:r.nombre}))}/>
+            </Td>
+            <Td className="w-48">
+              <Select value={u2.empleadoId||''} onChange={e=>vincularEmpleado(u2, e.target.value)}
+                options={[{v:'',l:'Sin vincular'},...db.empleados.map(e=>({v:e.id,l:e.nombre}))]}/>
             </Td>
             <Td><Badge tone={u2.estado==='ACTIVO'?'emerald':'slate'} dot>{u2.estado}</Badge></Td>
             <Td className="text-right">
@@ -454,6 +464,9 @@ export default function Configuracion({db, set, toast, refrescar}){
           <Input type="text" value={editUser.password} onChange={e=>uu('password',e.target.value)}/></Field>
         <Field label="Rol" req><Select value={editUser.rol_codigo} onChange={e=>uu('rol_codigo',e.target.value)}
           options={(db.roles||[]).map(r=>({v:r.codigo,l:r.nombre}))}/></Field>
+        <Field label="Empleado vinculado" hint="Opcional — si lo vinculas, esta cuenta ve su propio horario y marca su propia asistencia aunque el rol no tenga permiso amplio sobre esos módulos">
+          <Select value={editUser.empleado_id} onChange={e=>uu('empleado_id',e.target.value)}
+            options={[{v:'',l:'Sin vincular'},...db.empleados.map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}`}))]}/></Field>
       </div>;})()}
     </Modal>
 

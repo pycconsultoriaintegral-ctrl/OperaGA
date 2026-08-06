@@ -18,7 +18,7 @@ async function fetchAll(){
   ] = await Promise.all([
     supabase.from('configuracion').select('*').eq('id', 1).maybeSingle(),
     supabase.from('festivos').select('fecha').order('fecha'),
-    supabase.from('profiles').select('id,nombre,email,estado,rol_id,roles(codigo,nombre)'),
+    supabase.from('profiles').select('id,nombre,email,estado,rol_id,empleado_id,roles(codigo,nombre)'),
     supabase.from('auditoria').select('id,fecha,usuario_id,accion,entidad,entidad_id')
       .order('fecha', { ascending: false }).limit(200),
     supabase.from('roles').select('id,codigo,nombre,descripcion').order('id'),
@@ -43,7 +43,7 @@ async function fetchAll(){
 
   db.usuarios = (profilesRes.data || []).map(p => ({
     id: p.id, nombre: p.nombre, email: p.email || '',
-    rolId: p.rol_id, rolCodigo: p.roles?.codigo || '',
+    rolId: p.rol_id, rolCodigo: p.roles?.codigo || '', empleadoId: p.empleado_id || '',
     rol: (p.roles?.codigo || '—').toUpperCase(), estado: p.estado
   }));
 

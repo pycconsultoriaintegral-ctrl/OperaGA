@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
 
     if (action === 'crear') {
       if (!permiso?.crear) return json({ error: 'No tienes permiso para crear usuarios' }, 403);
-      const { email, password, nombre, rol_codigo } = p;
+      const { email, password, nombre, rol_codigo, empleado_id } = p;
       if (!email || !password || !nombre || !rol_codigo) return json({ error: 'Faltan datos' }, 400);
       if (password.length < 8) return json({ error: 'La contraseña debe tener al menos 8 caracteres' }, 400);
 
@@ -66,12 +66,21 @@ Deno.serve(async (req) => {
 
       const { error: profileErr } = await admin.from('profiles').insert({
         id: created.user.id, nombre, email, rol_id: rol.id, estado: 'ACTIVO',
+        empleado_id: empleado_id || null,
       });
       if (profileErr) {
         await admin.auth.admin.deleteUser(created.user.id); // revertir si falla el perfil
         return json({ error: profileErr.message }, 400);
       }
       return json({ ok: true, id: created.user.id });
+    }
+
+    if (action === 'vincular_empleado') {
+      if (!permiso?.editar) return json({ error: 'No tienes permiso para editar usuarios' }, 403);
+      const { user_id, empleado_id } = p;
+      const { error } = await admin.from('profiles').update({ empleado_id: empleado_id || null }).eq('id', user_id);
+      if (error) return json({ error: error.message }, 400);
+      return json({ ok: true });
     }
 
     if (action === 'cambiar_rol') {

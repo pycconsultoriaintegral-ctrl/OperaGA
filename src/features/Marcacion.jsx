@@ -4,9 +4,10 @@ import { TIPOS_TIEMPO, METODOS, VALIDACION } from '../lib/constants.js';
 import { uid, pad, fmtFecha, hoy } from '../lib/utils.js';
 import { validarMarcacion, distanciaMt } from '../lib/geo.js';
 
-export default function Marcacion({db, set, toast}){
+export default function Marcacion({db, set, toast, perfil}){
+  const propio = perfil?.empleado_id || perfil?.empleadoId || '';
   const [tab,setTab] = useState('kiosco');
-  const [emp,setEmp] = useState('');
+  const [emp,setEmp] = useState(propio);
   const [prop,setProp] = useState('');
   const [tipo,setTipo] = useState('EFECTIVO');
   const [codigo,setCodigo] = useState('');
@@ -43,6 +44,14 @@ export default function Marcacion({db, set, toast}){
       .then(d => vivo && setIp(d.ip)).catch(()=>{});
     return () => { vivo = false; };
   }, []);
+
+  // Cuenta autoservicio (vinculada a un empleado): preselecciona su propiedad
+  // asignada como mayordomo, si tiene una.
+  useEffect(() => {
+    if(!propio || prop) return;
+    const p = db.propiedades.find(x => x.mayordomo === propio);
+    if(p) setProp(p.id);
+  }, [propio, db.propiedades]);
 
   // ── Al escanear el QR fijo de una propiedad, la URL trae ?marcar=CODIGO ──
   // Precarga esa propiedad y el código, y pide la ubicación de una vez.
@@ -149,10 +158,14 @@ export default function Marcacion({db, set, toast}){
         <p className="text-xs text-ink-500 mb-5">El trabajador se identifica y el sistema valida que esté en la propiedad</p>
 
         <div className="grid sm:grid-cols-2 gap-4">
-          <div className="sm:col-span-2"><Field label="Empleado" req>
-            <Select value={emp} onChange={e=>{ const v=e.target.value; setEmp(v);
-              const p = db.propiedades.find(x=>x.mayordomo===v); if(p) setProp(p.id); }}
-              options={[{v:'',l:'Selecciona…'},...activos.map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}`}))]}/></Field></div>
+          <div className="sm:col-span-2"><Field label="Empleado" req
+              hint={propio ? 'Tu cuenta está vinculada a este empleado — no puedes marcar por otra persona' : undefined}>
+            {propio ? <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-ink-100 dark:bg-ink-800 text-sm font-semibold">
+                <Avatar nombre={empleado?.nombre} size="w-6 h-6"/>{empleado?.nombre || 'Empleado no encontrado'}</div>
+            : <Select value={emp} onChange={e=>{ const v=e.target.value; setEmp(v);
+                const p = db.propiedades.find(x=>x.mayordomo===v); if(p) setProp(p.id); }}
+                options={[{v:'',l:'Selecciona…'},...activos.map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}`}))]}/>}
+          </Field></div>
           <div className="sm:col-span-2"><Field label="Propiedad" req>
             <Select value={prop} onChange={e=>setProp(e.target.value)}
               options={[{v:'',l:'Selecciona…'},...db.propiedades.map(p=>({v:p.id,l:`${p.nombre} (${p.codigo})`}))]}/></Field></div>

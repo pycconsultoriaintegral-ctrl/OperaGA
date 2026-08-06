@@ -23,7 +23,7 @@ export function usePermisos(){
 
       const { data: perfilData, error: perfilErr } = await supabase
         .from('profiles')
-        .select('id, nombre, rol_id, estado, roles ( codigo, nombre )')
+        .select('id, nombre, rol_id, estado, empleado_id, roles ( codigo, nombre )')
         .eq('id', session.user.id)
         .maybeSingle();
 

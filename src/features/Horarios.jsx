@@ -10,7 +10,7 @@ function lunesActual(){
   return addDias(hoy(), dow===0 ? -6 : 1-dow);
 }
 
-export default function Horarios({db, set, toast}){
+export default function Horarios({db, set, toast, perfil, has}){
   const [tab,setTab]=useState('programar');
   const [ini,setIni]=useState(lunesActual);
   const [pincel,setPincel]=useState('DIA');
@@ -88,6 +88,40 @@ export default function Horarios({db, set, toast}){
 
   const cargos=[...new Set(db.empleados.map(e=>e.cargo))];
   const totalComp=comps.reduce((s,c)=>s+Math.max(0,c.saldo),0);
+
+  // Cuenta autoservicio (vinculada a un empleado) sin permiso de editar
+  // horarios: en vez del programador completo (que asume que puede ver y
+  // editar el horario de todos), ve una vista simple de solo lectura de
+  // su propio horario — las políticas RLS de "propio" ya limitan
+  // db.horarios/db.asistencia a únicamente sus filas.
+  const propioId = perfil?.empleado_id;
+  if(propioId && !has?.('horarios','editar')){
+    const miEmp = db.empleados.find(e=>e.id===propioId);
+    const miasDias = Array.from({length:14},(_,i)=>addDias(hoy(),i));
+    const misComp = calcularCompensatorios(miEmp?[miEmp]:[], db.horarios||[], db.asistencia, db.novedades, db.festivos, cfg);
+    const miSaldo = misComp[0]?.saldo || 0;
+    return <Page title="Mi horario" sub={miEmp?.nombre || ''}>
+      {!miEmp ? <Card><Empty icon="calendar" title="No se encontró tu ficha de empleado"
+          sub="Pide a un administrador que revise la vinculación de tu cuenta."/></Card> : <>
+        {miSaldo>0 && <Card className="mb-4 !p-4 bg-amber-50 dark:bg-amber-500/10 ring-amber-500/20">
+          <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+            Tienes {fmtNum(miSaldo,1)} día(s) de descanso compensatorio pendientes.</p>
+        </Card>}
+        <Card pad={false}>
+          <Table head={['Día','Fecha','Turno','Horario']}>
+            {miasDias.map(f=>{
+              const h=horIdx[propioId+'|'+f]; const t=h?turIdx[h.tur]:null;
+              return <tr key={f}>
+                <Td className="font-semibold">{nombreDia(f)}</Td>
+                <Td className="num">{fmtFecha(f)}</Td>
+                <Td>{t?<Badge tone={t.color} dot>{t.label}</Badge>:<span className="text-ink-400 text-xs">Sin programar</span>}</Td>
+                <Td className="num text-xs">{t&&t.ini&&!t.interno?`${t.ini} – ${t.fin}`:t?.interno?'Todo el día (interno)':'—'}</Td>
+              </tr>;})}
+          </Table>
+        </Card>
+      </>}
+    </Page>;
+  }
 
   return <Page title="Horarios" sub="Programación de turnos, horas a laborar y descansos compensatorios"
     actions={<><Btn v="outline" icon="copy" onClick={copiarSemana}>Copiar semana</Btn>
