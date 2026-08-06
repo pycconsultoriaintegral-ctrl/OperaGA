@@ -4,9 +4,15 @@ import { compararProgramado, calcularCompensatorios, horasTurno } from '../lib/p
 import { ESTADO_CUMPL } from '../lib/constants.js';
 import { uid, addDias, fmtNum, fmtFecha, nombreDia, esDomingo, hoy } from '../lib/utils.js';
 
+// Lunes de la semana que contiene `hoy()`, para abrir el programador ahí por defecto.
+function lunesActual(){
+  const dow = new Date(hoy()+'T12:00:00').getDay(); // 0=domingo
+  return addDias(hoy(), dow===0 ? -6 : 1-dow);
+}
+
 export default function Horarios({db, set, toast}){
   const [tab,setTab]=useState('programar');
-  const [ini,setIni]=useState('2026-07-20');
+  const [ini,setIni]=useState(lunesActual);
   const [pincel,setPincel]=useState('DIA');
   const [editT,setEditT]=useState(null);
   const [fcargo,setFcargo]=useState('');
@@ -108,7 +114,7 @@ export default function Horarios({db, set, toast}){
             options={[{v:'',l:'Todos'},...cargos.map(c=>({v:c,l:c}))]}/></Field>
           <div className="lg:col-span-2 flex gap-2 flex-wrap">
             <Btn v="outline" s="sm" icon="chevL" onClick={()=>setIni(addDias(ini,-7))}>Anterior</Btn>
-            <Btn v="outline" s="sm" onClick={()=>setIni('2026-07-20')}>Semana actual</Btn>
+            <Btn v="outline" s="sm" onClick={()=>setIni(lunesActual())}>Semana actual</Btn>
             <Btn v="outline" s="sm" onClick={()=>setIni(addDias(ini,7))}>Siguiente</Btn>
           </div>
         </div>

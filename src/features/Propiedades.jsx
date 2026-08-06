@@ -6,7 +6,7 @@ import { uid, diffDias, addDias, fmtCOP, fmtFecha, fmtNum, esDomingo, nombreDia,
 export default function Propiedades({db, set, toast}){
   const [tab,setTab] = useState('props');
   const [edit,setEdit] = useState(null); const [editR,setEditR] = useState(null);
-  const HOY = '2026-07-24';
+  const HOY = hoy();
 
   const vacio  = { id:'', nombre:'', codigo:'', tipo:'Casa', ubicacion:'', capacidad:4, habitaciones:2, banos:2,
                    estado:'DISPONIBLE', mayordomo:'', tarifa:500000, notas:'', lat:'', lng:'', ipsTexto:'' };
@@ -99,10 +99,10 @@ export default function Propiedades({db, set, toast}){
       </Table></Card>}
 
     {tab==='calendario' && (()=>{
-      const dias = Array.from({length:35},(_,i)=>addDias('2026-07-13',i));
+      const dias = Array.from({length:35},(_,i)=>addDias(addDias(HOY,-11),i));
       return <Card pad={false}>
         <div className="p-4 border-b border-ink-200 dark:border-ink-800 flex items-center justify-between">
-          <h3 className="font-bold text-ink-900 dark:text-white">Ocupación · 13 jul – 16 ago 2026</h3>
+          <h3 className="font-bold text-ink-900 dark:text-white">Ocupación · {fmtFecha(dias[0])} – {fmtFecha(dias[dias.length-1])}</h3>
           <div className="flex gap-3 text-[11px] font-semibold">
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-brand-500"/>Reservada</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-ink-200 dark:bg-ink-700"/>Libre</span></div>
