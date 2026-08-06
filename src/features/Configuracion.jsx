@@ -7,6 +7,28 @@ import { supabase } from '../lib/supabaseClient.js';
 
 const ROL_TONE = { ADMINISTRADOR:'brand', GESTION_HUMANA:'emerald', SUPERVISOR:'violet', CONSULTA:'sky' };
 
+// Módulos administrables desde la matriz de permisos, en el mismo orden del menú.
+const MODULOS_PERMISOS = [
+  { modulo:'empleados',         label:'Empleados (completo, con salario/documento)' },
+  { modulo:'empleados_publico', label:'Empleados (solo nombre/cargo, sin datos financieros)' },
+  { modulo:'propiedades',       label:'Propiedades y reservas' },
+  { modulo:'horarios',          label:'Horarios' },
+  { modulo:'asistencia',        label:'Asistencia y Marcación' },
+  { modulo:'novedades',         label:'Novedades' },
+  { modulo:'liquidacion',       label:'Liquidación' },
+  { modulo:'reportes',          label:'Reportes' },
+  { modulo:'configuracion',     label:'Configuración' },
+  { modulo:'usuarios',          label:'Usuarios y roles' },
+  { modulo:'auditoria',         label:'Auditoría' },
+];
+const ACCIONES_PERMISOS = [
+  { accion:'ver',      label:'Ver' },
+  { accion:'crear',    label:'Crear' },
+  { accion:'editar',   label:'Editar' },
+  { accion:'eliminar', label:'Eliminar' },
+  { accion:'exportar', label:'Exportar' },
+];
+
 export default function Configuracion({db, set, toast, refrescar}){
   const [tab,setTab] = useState('jornada');
   const [cfg,setCfg] = useState(db.cfg);
@@ -52,6 +74,55 @@ export default function Configuracion({db, set, toast, refrescar}){
     catch(e){ toast(e.message,'rose'); }
   };
 
+  // ── Permisos por rol ──
+  // roles/permisos ya tienen políticas RLS que permiten escribir a cualquiera
+  // con permiso 'usuarios'.'editar' — se escribe directo, sin Edge Function.
+  const [rolSel,setRolSel] = useState(() => db.roles?.[0]?.id ?? null);
+  const [guardandoPermiso,setGuardandoPermiso] = useState('');
+  const [nuevoRol,setNuevoRol] = useState(null);
+
+  const permisoDe = (rolId, modulo) =>
+    db.permisos?.find(p => p.rolId===rolId && p.modulo===modulo)
+    || { rolId, modulo, ver:false, crear:false, editar:false, eliminar:false, exportar:false };
+
+  const togglePermiso = async (rolId, modulo, accion, valorActual) => {
+    const key = `${rolId}:${modulo}:${accion}`;
+    setGuardandoPermiso(key);
+    const existente = db.permisos?.find(p => p.rolId===rolId && p.modulo===modulo);
+    try{
+      if(existente){
+        const { error } = await supabase.from('permisos').update({ [accion]: !valorActual }).eq('id', existente.id);
+        if(error) throw error;
+      } else {
+        const fila = { rol_id:rolId, modulo, ver:false, crear:false, editar:false, eliminar:false, exportar:false, [accion]:true };
+        const { error } = await supabase.from('permisos').insert(fila);
+        if(error) throw error;
+      }
+      await refrescar?.();
+    }catch(e){ toast('No se pudo guardar: '+e.message,'rose'); }
+    setGuardandoPermiso('');
+  };
+
+  const crearRol = async () => {
+    if(!nuevoRol?.codigo.trim() || !nuevoRol?.nombre.trim()) return toast('Código y nombre son obligatorios','rose');
+    try{
+      const { error } = await supabase.from('roles').insert({
+        codigo: nuevoRol.codigo.trim().toLowerCase().replace(/\s+/g,'_'), nombre: nuevoRol.nombre.trim() });
+      if(error) throw error;
+      toast('Rol creado'); setNuevoRol(null); await refrescar?.();
+    }catch(e){ toast('No se pudo crear el rol: '+e.message,'rose'); }
+  };
+
+  const borrarRol = async (rol) => {
+    if(!confirm(`¿Eliminar el rol "${rol.nombre}"? Solo se puede si ningún usuario lo tiene asignado.`)) return;
+    try{
+      const { error } = await supabase.from('roles').delete().eq('id', rol.id);
+      if(error) throw error;
+      toast('Rol eliminado','rose'); if(rolSel===rol.id) setRolSel(db.roles.find(r=>r.id!==rol.id)?.id ?? null);
+      await refrescar?.();
+    }catch(e){ toast('No se pudo eliminar: tiene usuarios asignados u otra dependencia. '+e.message,'rose'); }
+  };
+
   const P = ({label, k, hint, tipo='number', suf}) => (
     <Field label={label} hint={hint}>
       <div className="relative">
@@ -73,7 +144,7 @@ export default function Configuracion({db, set, toast, refrescar}){
       {id:'jornada',label:'Jornada y topes'},{id:'recargos',label:'Recargos'},
       {id:'internos',label:'Trabajadores internos'},{id:'marcacion',label:'Marcación'},{id:'nomina',label:'Nómina'},
       {id:'festivos',label:'Festivos',count:db.festivos.length},
-      {id:'usuarios',label:'Usuarios y roles'},{id:'auditoria',label:'Auditoría'}]}/></div>
+      {id:'usuarios',label:'Usuarios y roles'},{id:'permisos',label:'Permisos'},{id:'auditoria',label:'Auditoría'}]}/></div>
 
     {tab==='jornada' && <div className="grid lg:grid-cols-3 gap-4">
       <Card className="lg:col-span-2">
@@ -295,18 +366,82 @@ export default function Configuracion({db, set, toast, refrescar}){
         </Table>
       </Card>
       <Card>
-        <h3 className="font-bold text-ink-900 dark:text-white mb-4">Roles disponibles</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-ink-900 dark:text-white">Roles disponibles</h3>
+          <Btn s="sm" v="soft" icon="plus" onClick={()=>setNuevoRol({codigo:'',nombre:''})}>Nuevo rol</Btn>
+        </div>
         <div className="space-y-3">
           {(db.roles||[]).map(r =>
-            <div key={r.id} className="p-3 rounded-xl ring-1 ring-inset ring-ink-200 dark:ring-ink-800">
-              <Badge tone={ROL_TONE[r.codigo.toUpperCase()]||'slate'}>{r.nombre}</Badge>
-              <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-2">
-                Los permisos exactos (ver/crear/editar/eliminar/exportar por módulo) se administran en la
-                tabla <code>permisos</code> de Supabase.</p>
+            <div key={r.id} className="p-3 rounded-xl ring-1 ring-inset ring-ink-200 dark:ring-ink-800 flex items-start justify-between gap-2">
+              <div>
+                <Badge tone={ROL_TONE[r.codigo.toUpperCase()]||'slate'}>{r.nombre}</Badge>
+                <p className="text-[11px] text-ink-500 dark:text-ink-400 mt-2">
+                  Sus permisos se configuran en la pestaña <b>Permisos</b>.</p>
+              </div>
+              <button onClick={()=>borrarRol(r)} title="Eliminar rol"
+                className="p-1.5 rounded-lg text-ink-300 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0">
+                <Icon n="trash" c="w-4 h-4"/></button>
             </div>)}
         </div>
       </Card>
     </div>}
+
+    {tab==='permisos' && <div className="grid lg:grid-cols-4 gap-4">
+      <Card className="lg:col-span-1">
+        <h3 className="font-bold text-ink-900 dark:text-white mb-4">Rol a editar</h3>
+        <div className="space-y-1.5">
+          {(db.roles||[]).map(r => (
+            <button key={r.id} onClick={()=>setRolSel(r.id)}
+              className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                rolSel===r.id ? 'bg-brand-600 text-white' : 'text-ink-600 dark:text-ink-300 hover:bg-ink-100 dark:hover:bg-ink-800'}`}>
+              {r.nombre}
+            </button>))}
+        </div>
+        <Btn s="sm" v="outline" icon="plus" className="w-full mt-3" onClick={()=>setNuevoRol({codigo:'',nombre:''})}>Nuevo rol</Btn>
+      </Card>
+      <Card className="lg:col-span-3" pad={false}>
+        <div className="p-5 border-b border-ink-200 dark:border-ink-800">
+          <h3 className="font-bold text-ink-900 dark:text-white">
+            Permisos de {db.roles?.find(r=>r.id===rolSel)?.nombre || '—'}</h3>
+          <p className="text-xs text-ink-500">Se guarda apenas marcas o desmarcas una casilla — no hace falta un botón "Guardar".</p>
+        </div>
+        {!rolSel ? <div className="p-8 text-center text-sm text-ink-500">Crea o selecciona un rol.</div>
+        : <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50 dark:bg-ink-950/60 border-b border-ink-200 dark:border-ink-800">
+              <tr>
+                <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-ink-500">Módulo</th>
+                {ACCIONES_PERMISOS.map(a=><th key={a.accion} className="px-3 py-2.5 text-center text-[11px] font-bold uppercase tracking-wide text-ink-500">{a.label}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+              {MODULOS_PERMISOS.map(m => { const p = permisoDe(rolSel, m.modulo); return (
+                <tr key={m.modulo}>
+                  <Td className="font-semibold text-xs">{m.label}</Td>
+                  {ACCIONES_PERMISOS.map(a => { const key=`${rolSel}:${m.modulo}:${a.accion}`; return (
+                    <Td key={a.accion} className="text-center">
+                      <input type="checkbox" checked={p[a.accion]} disabled={guardandoPermiso===key}
+                        onChange={()=>togglePermiso(rolSel, m.modulo, a.accion, p[a.accion])}
+                        className="w-4 h-4 rounded accent-brand-600 cursor-pointer disabled:opacity-40"/>
+                    </Td>);})}
+                </tr>);})}
+            </tbody>
+          </table>
+        </div>}
+      </Card>
+    </div>}
+
+    <Modal open={!!nuevoRol} onClose={()=>setNuevoRol(null)} title="Nuevo rol"
+      sub="Empieza sin permisos — actívalos desde la pestaña Permisos"
+      footer={<><Btn v="outline" onClick={()=>setNuevoRol(null)}>Cancelar</Btn>
+        <Btn onClick={crearRol} icon="check">Crear rol</Btn></>}>
+      {nuevoRol && <div className="space-y-4">
+        <Field label="Nombre visible" req hint="Ej. Contador, Recursos Humanos Junior">
+          <Input value={nuevoRol.nombre} onChange={e=>setNuevoRol({...nuevoRol,nombre:e.target.value})}/></Field>
+        <Field label="Código interno" req hint="Sin espacios ni tildes, ej. contador">
+          <Input value={nuevoRol.codigo} onChange={e=>setNuevoRol({...nuevoRol,codigo:e.target.value})}/></Field>
+      </div>}
+    </Modal>
 
     <Modal open={!!editUser} onClose={()=>setEditUser(null)} title="Nuevo usuario"
       sub="Crea el acceso real — queda activo de inmediato"

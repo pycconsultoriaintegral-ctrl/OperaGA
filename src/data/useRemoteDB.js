@@ -13,7 +13,7 @@ const fmtFechaHora = iso => {
  *  consumen los 11 módulos (misma forma que el localStorage del prototipo). */
 async function fetchAll(){
   const [
-    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes,
+    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes,
     ...tablaRes
   ] = await Promise.all([
     supabase.from('configuracion').select('*').eq('id', 1).maybeSingle(),
@@ -21,11 +21,12 @@ async function fetchAll(){
     supabase.from('profiles').select('id,nombre,email,estado,rol_id,roles(codigo,nombre)'),
     supabase.from('auditoria').select('id,fecha,usuario_id,accion,entidad,entidad_id')
       .order('fecha', { ascending: false }).limit(200),
-    supabase.from('roles').select('id,codigo,nombre').order('id'),
+    supabase.from('roles').select('id,codigo,nombre,descripcion').order('id'),
+    supabase.from('permisos').select('id,rol_id,modulo,ver,crear,editar,eliminar,exportar'),
     ...TABLAS_SYNCABLES.map(key => supabase.from(TABLAS[key].table).select('*'))
   ]);
 
-  for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, ...tablaRes]) {
+  for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes, ...tablaRes]) {
     if (res.error) throw res.error;
   }
 
@@ -46,7 +47,12 @@ async function fetchAll(){
     rol: (p.roles?.codigo || '—').toUpperCase(), estado: p.estado
   }));
 
-  db.roles = (rolesRes.data || []).map(r => ({ id: r.id, codigo: r.codigo, nombre: r.nombre }));
+  db.roles = (rolesRes.data || []).map(r => ({ id: r.id, codigo: r.codigo, nombre: r.nombre, descripcion: r.descripcion || '' }));
+
+  db.permisos = (permisosRes.data || []).map(p => ({
+    id: p.id, rolId: p.rol_id, modulo: p.modulo,
+    ver: !!p.ver, crear: !!p.crear, editar: !!p.editar, eliminar: !!p.eliminar, exportar: !!p.exportar
+  }));
 
   db.auditoria = (auditoriaRes.data || []).map(a => ({
     id: a.id, fecha: fmtFechaHora(a.fecha),
