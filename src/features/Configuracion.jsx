@@ -129,6 +129,31 @@ export default function Configuracion({db, set, toast, refrescar}){
     }catch(e){ toast('No se pudo eliminar: tiene usuarios asignados u otra dependencia. '+e.message,'rose'); }
   };
 
+  // ── Cargos ──
+  const [nuevoCargo,setNuevoCargo] = useState('');
+  const [guardandoCargo,setGuardandoCargo] = useState(false);
+
+  const crearCargo = async () => {
+    const nombre = nuevoCargo.trim();
+    if(!nombre) return toast('Escribe un nombre para el cargo','rose');
+    setGuardandoCargo(true);
+    try{
+      const { error } = await supabase.from('cargos').insert({ nombre });
+      if(error) throw error;
+      toast('Cargo creado'); setNuevoCargo(''); await refrescar?.();
+    }catch(e){ toast(e.code==='23505'?'Ese cargo ya existe':'No se pudo crear: '+e.message,'rose'); }
+    setGuardandoCargo(false);
+  };
+
+  const borrarCargo = async (cargo) => {
+    if(!confirm(`¿Eliminar el cargo "${cargo.nombre}"? Solo se puede si ningún empleado lo tiene asignado.`)) return;
+    try{
+      const { error } = await supabase.from('cargos').delete().eq('id', cargo.id);
+      if(error) throw error;
+      toast('Cargo eliminado','rose'); await refrescar?.();
+    }catch(e){ toast('No se pudo eliminar: hay empleados con ese cargo asignado.','rose'); }
+  };
+
   const P = ({label, k, hint, tipo='number', suf}) => (
     <Field label={label} hint={hint}>
       <div className="relative">
@@ -149,7 +174,7 @@ export default function Configuracion({db, set, toast, refrescar}){
     <div className="mb-5"><Tabs active={tab} onChange={setTab} tabs={[
       {id:'jornada',label:'Jornada y topes'},{id:'recargos',label:'Recargos'},
       {id:'internos',label:'Trabajadores internos'},{id:'marcacion',label:'Marcación'},{id:'nomina',label:'Nómina'},
-      {id:'festivos',label:'Festivos',count:db.festivos.length},
+      {id:'festivos',label:'Festivos',count:db.festivos.length},{id:'cargos',label:'Cargos',count:(db.cargos||[]).length},
       {id:'usuarios',label:'Usuarios y roles'},{id:'permisos',label:'Permisos'},{id:'auditoria',label:'Auditoría'}]}/></div>
 
     {tab==='jornada' && <div className="grid lg:grid-cols-3 gap-4">
@@ -344,6 +369,36 @@ export default function Configuracion({db, set, toast, refrescar}){
         </div>
         <div className="mt-4 p-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 text-[11px] text-rose-800 dark:text-rose-200">
           Cada día marcado como festivo aplica automáticamente el recargo del <b>{cfg.recDominical}%</b> a todas las horas trabajadas.</div>
+      </Card>
+    </div>}
+
+    {tab==='cargos' && <div className="grid lg:grid-cols-3 gap-4">
+      <Card className="lg:col-span-2">
+        <div className="flex items-center justify-between mb-4">
+          <div><h3 className="font-bold text-ink-900 dark:text-white">Cargos</h3>
+            <p className="text-xs text-ink-500">Los cargos que aparecen al crear o editar un empleado</p></div></div>
+        <div className="flex gap-2 mb-4">
+          <input className={IN} placeholder="Nombre del cargo, ej. Jardinero" value={nuevoCargo}
+            onChange={e=>setNuevoCargo(e.target.value)} onKeyDown={e=>e.key==='Enter' && crearCargo()}/>
+          <Btn icon="plus" onClick={crearCargo} disabled={guardandoCargo}>{guardandoCargo?'Creando…':'Agregar'}</Btn>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {(db.cargos||[]).map(c => (
+            <div key={c.id} className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-ink-50 dark:bg-ink-950/50 ring-1 ring-inset ring-ink-200/60 dark:ring-ink-800">
+              <span className="text-sm font-semibold text-ink-800 dark:text-ink-100">{c.nombre}</span>
+              <button onClick={()=>borrarCargo(c)} className="p-1 rounded text-ink-300 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><Icon n="x" c="w-3.5 h-3.5"/></button>
+            </div>))}
+        </div>
+      </Card>
+      <Card>
+        <h3 className="font-bold text-ink-900 dark:text-white mb-2">Empleados por cargo</h3>
+        <div className="space-y-2">
+          {(db.cargos||[]).map(c => {
+            const n = db.empleados.filter(e=>e.cargo===c.nombre && e.estado==='ACTIVO').length;
+            return <div key={c.id} className="flex justify-between py-1.5 text-sm">
+              <span className="text-ink-500">{c.nombre}</span>
+              <span className="font-bold text-ink-900 dark:text-white num">{n}</span></div>;})}
+        </div>
       </Card>
     </div>}
 

@@ -13,7 +13,7 @@ const fmtFechaHora = iso => {
  *  consumen los 11 módulos (misma forma que el localStorage del prototipo). */
 async function fetchAll(){
   const [
-    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes,
+    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes, cargosRes,
     ...tablaRes
   ] = await Promise.all([
     supabase.from('configuracion').select('*').eq('id', 1).maybeSingle(),
@@ -23,12 +23,16 @@ async function fetchAll(){
       .order('fecha', { ascending: false }).limit(200),
     supabase.from('roles').select('id,codigo,nombre,descripcion').order('id'),
     supabase.from('permisos').select('id,rol_id,modulo,ver,crear,editar,eliminar,exportar'),
+    supabase.from('cargos').select('id,nombre').order('nombre'),
     ...TABLAS_SYNCABLES.map(key => supabase.from(TABLAS[key].table).select('*'))
   ]);
 
   for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes, ...tablaRes]) {
     if (res.error) throw res.error;
   }
+  // La tabla `cargos` es de la migración 0008: si todavía no se ha corrido en
+  // este proyecto de Supabase, no tiene que tumbar el resto de la app.
+  if (cargosRes.error) console.warn('Tabla `cargos` no disponible (¿falta correr la migración 0008?):', cargosRes.error.message);
 
   const db = {
     cfg: cfgFromRow(cfgRes.data),
@@ -48,6 +52,8 @@ async function fetchAll(){
   }));
 
   db.roles = (rolesRes.data || []).map(r => ({ id: r.id, codigo: r.codigo, nombre: r.nombre, descripcion: r.descripcion || '' }));
+
+  db.cargos = (cargosRes.data || []).map(c => ({ id: c.id, nombre: c.nombre }));
 
   db.permisos = (permisosRes.data || []).map(p => ({
     id: p.id, rolId: p.rol_id, modulo: p.modulo,
@@ -145,7 +151,7 @@ export function useRemoteDB(toast){
   useEffect(() => {
     recargar().finally(() => setLoading(false));
 
-    const tablasRealtime = [...TABLAS_SYNCABLES.map(k => TABLAS[k].table), 'festivos', 'configuracion'];
+    const tablasRealtime = [...TABLAS_SYNCABLES.map(k => TABLAS[k].table), 'festivos', 'configuracion', 'cargos'];
     let timeoutId = null;
     const debounceRecargar = () => { clearTimeout(timeoutId); timeoutId = setTimeout(recargar, 400); };
 

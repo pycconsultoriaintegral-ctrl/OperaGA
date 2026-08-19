@@ -50,8 +50,6 @@ export const FESTIVOS_2027 = ['2027-01-01','2027-01-11','2027-03-22','2027-03-25
   '2027-05-01','2027-05-10','2027-05-31','2027-06-07','2027-07-05','2027-07-20','2027-08-07',
   '2027-08-16','2027-10-18','2027-11-01','2027-11-15','2027-12-08','2027-12-25'];
 
-export const CARGOS = ['Mayordomo','Mucama','Conductor','Mantenimiento','Supervisor','Administrativo'];
-
 export const TIPOS_TIEMPO = {
   EFECTIVO:      { id:'EFECTIVO',      label:'Trabajo efectivo',  color:'emerald', desc:'Prestación activa de servicios' },
   DISPONIBLE:    { id:'DISPONIBLE',    label:'Disponibilidad',    color:'amber',   desc:'En propiedad, sin servicio activo' },
@@ -79,9 +77,14 @@ export const ESTADOS_PROP = {
   INACTIVA:   { label:'Inactiva',   color:'slate'   }
 };
 
-export const EPS_LIST = ['Sura','Sanitas','Compensar','Nueva EPS','Salud Total','Coosalud','Famisanar','Mutual Ser'];
+// Listas de sugerencia (no exhaustivas a propósito): qué EPS/AFP/ARL están
+// habilitadas varía por municipio y cambia con el tiempo (reforma de salud
+// 2026). El campo permite escribir cualquier valor que no aparezca aquí.
+export const EPS_LIST = ['Nueva EPS','Sura','Sanitas','Compensar','Salud Total','Coosalud','Famisanar',
+  'Mutual Ser','Aliansalud','Savia Salud','Capital Salud','Comfenalco Valle','Cajacopi Atlántico',
+  'Comfachocó','Capresoca','Asmet Salud','Emssanar','EPS Fomag (Magisterio)','SOS'];
 export const AFP_LIST = ['Porvenir','Protección','Colfondos','Skandia','Colpensiones'];
-export const ARL_LIST = ['Sura ARL','Positiva','Colmena','Bolívar','Axa Colpatria'];
+export const ARL_LIST = ['Sura ARL','Positiva','Colmena','Bolívar','Axa Colpatria','Mapfre','Equidad Seguros'];
 
 export const METODOS = {
   QR:     { id:'QR',     label:'Código QR',   icon:'qr',    color:'brand'  },

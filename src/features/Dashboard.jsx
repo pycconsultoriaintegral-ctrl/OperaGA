@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Page, Card, Stat, Badge, Icon, Bar, Btn, Avatar, exportCSV, TONE } from '../components/ui.jsx';
-import { CARGOS, ESTADOS_PROP, TIPOS_NOVEDAD } from '../lib/constants.js';
+import { ESTADOS_PROP, TIPOS_NOVEDAD } from '../lib/constants.js';
 import { addDias, esDomingo, fmtNum, fmtCOP, fmtFechaLarga, fmtFecha, nombreDia, hoy } from '../lib/utils.js';
 import { liquidar, valorizar } from '../lib/payroll.js';
 
@@ -38,7 +38,7 @@ export default function Dashboard({db, go}){
     }
 
     // Distribución por cargo
-    const porCargo = CARGOS.map(c => {
+    const porCargo = (db.cargos||[]).map(({nombre:c}) => {
       const ids = empleados.filter(e=>e.cargo===c && e.estado==='ACTIVO').map(e=>e.id);
       const rr = liquidar(regs.filter(x=>ids.includes(x.empleado)), cfg, festivos);
       return { cargo:c, n:ids.length, horas:rr.totalEfectivo };

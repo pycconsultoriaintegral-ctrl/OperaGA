@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select, Area, Tabs, Icon } from '../components/ui.jsx';
 import { ESTADOS_PROP } from '../lib/constants.js';
 import { uid, diffDias, addDias, fmtCOP, fmtFecha, fmtNum, esDomingo, nombreDia, hoy } from '../lib/utils.js';
+import { supabase } from '../lib/supabaseClient.js';
 
-export default function Propiedades({db, set, toast}){
+export default function Propiedades({db, set, toast, refrescar}){
   const [tab,setTab] = useState('props');
   const [edit,setEdit] = useState(null); const [editR,setEditR] = useState(null);
   const HOY = hoy();
@@ -30,6 +31,19 @@ export default function Propiedades({db, set, toast}){
     setEditR(null); toast(n?'Reserva creada':'Reserva actualizada'); };
 
   const mayordomos = db.empleados.filter(e=>e.cargo==='Mayordomo' && e.estado==='ACTIVO');
+
+  const eliminarProp = async (p) => {
+    const tieneReservas = db.reservas.some(r=>r.propiedad===p.id);
+    const aviso = tieneReservas
+      ? `"${p.nombre}" tiene reservas registradas. Si continúas, esas reservas y su historial de asistencia también podrían perderse. ¿Eliminar de todas formas?`
+      : `¿Eliminar la propiedad "${p.nombre}"? Esta acción no se puede deshacer.`;
+    if(!confirm(aviso)) return;
+    try{
+      const { error } = await supabase.from('propiedades').delete().eq('id', p.id);
+      if(error) throw error;
+      toast('Propiedad eliminada','rose'); await refrescar?.();
+    }catch(e){ toast('No se pudo eliminar: tiene registros asociados (asistencia, horarios u otros). '+e.message,'rose'); }
+  };
 
   return <Page title="Propiedades" sub={`${db.propiedades.length} inmuebles · ${db.reservas.filter(r=>r.estado!=='FINALIZADA').length} reservas activas`}
     actions={tab==='props'
@@ -75,6 +89,9 @@ export default function Propiedades({db, set, toast}){
           <div className="mt-4 flex gap-2">
             <Btn v="outline" s="sm" icon="edit" onClick={()=>setEdit({...p, lat:p.lat??'', lng:p.lng??'', ipsTexto:(p.ips||[]).join(', ')})} className="flex-1">Editar</Btn>
             <Btn v="soft" s="sm" icon="calendar" onClick={()=>{setEditR({...vacioR,propiedad:p.id});}} className="flex-1">Reservar</Btn>
+            <button onClick={()=>eliminarProp(p)} title="Eliminar propiedad"
+              className="p-2 rounded-lg text-ink-300 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0">
+              <Icon n="trash" c="w-4 h-4"/></button>
           </div>
         </Card>;
       })}

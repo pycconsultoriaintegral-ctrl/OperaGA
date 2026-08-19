@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select, Area, Empty, IN, Icon, exportCSV } from '../components/ui.jsx';
-import { CARGOS, CONFIG_DEFAULT, EPS_LIST, AFP_LIST, ARL_LIST } from '../lib/constants.js';
+import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select, Combo, Area, Empty, IN, Icon, exportCSV } from '../components/ui.jsx';
+import { CONFIG_DEFAULT, EPS_LIST, AFP_LIST, ARL_LIST } from '../lib/constants.js';
 import { uid, fmtCOP, fmtFecha, edad, diffDias, hoy } from '../lib/utils.js';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -9,11 +9,13 @@ export default function Empleados({db, set, toast}){
   const [sel,setSel] = useState(null); const [edit,setEdit] = useState(null);
   const [subiendoFoto,setSubiendoFoto] = useState(false);
 
+  const cargos = useMemo(() => (db.cargos||[]).map(c=>c.nombre), [db.cargos]);
+
   const lista = useMemo(() => db.empleados.filter(e =>
     (!q || e.nombre.toLowerCase().includes(q.toLowerCase()) || e.doc.includes(q)) &&
     (!fc || e.cargo===fc)), [db.empleados,q,fc]);
 
-  const vacio = () => ({ id:uid(), nombre:'', doc:'', tipoDoc:'CC', cargo:'Mucama', nacimiento:'', tel:'', email:'',
+  const vacio = () => ({ id:uid(), nombre:'', doc:'', tipoDoc:'CC', cargo:cargos[0]||'', nacimiento:'', tel:'', email:'',
     dir:'', ingreso:hoy(), contrato:'Término indefinido', salario:CONFIG_DEFAULT.salarioMinimo, bonificacion:0,
     eps:'Sura', afp:'Porvenir', arl:'Sura ARL', banco:'', cuenta:'', contactoEmg:'', estado:'ACTIVO', interno:false, foto:null });
 
@@ -56,7 +58,7 @@ export default function Empleados({db, set, toast}){
           <input className={IN+' pl-9'} placeholder="Buscar por nombre o documento…" value={q} onChange={e=>setQ(e.target.value)}/>
         </div>
         <select className={IN+' sm:w-52'} value={fc} onChange={e=>setFc(e.target.value)}>
-          <option value="">Todos los cargos</option>{CARGOS.map(c=><option key={c}>{c}</option>)}</select>
+          <option value="">Todos los cargos</option>{cargos.map(c=><option key={c}>{c}</option>)}</select>
       </div>
 
       {lista.length===0 ? <Empty icon="users" title="Sin resultados" sub="Ajusta los filtros o crea un nuevo empleado."/>
@@ -152,7 +154,8 @@ export default function Empleados({db, set, toast}){
           </div></div>
         <div><h5 className="text-[11px] font-bold uppercase tracking-wide text-brand-600 mb-3">Vínculo laboral</h5>
           <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Cargo"><Select value={edit.cargo} onChange={e=>u('cargo',e.target.value)} options={CARGOS}/></Field>
+            <Field label="Cargo" hint="¿Falta un cargo? Créalo en Configuración → Cargos">
+              <Select value={edit.cargo} onChange={e=>u('cargo',e.target.value)} options={cargos}/></Field>
             <Field label="Tipo de contrato"><Select value={edit.contrato} onChange={e=>u('contrato',e.target.value)}
               options={['Término indefinido','Término fijo 1 año','Término fijo 6 meses','Obra o labor','Aprendizaje']}/></Field>
             <Field label="Fecha de ingreso"><Input type="date" value={edit.ingreso} onChange={e=>u('ingreso',e.target.value)}/></Field>
@@ -167,9 +170,10 @@ export default function Empleados({db, set, toast}){
           </div></div>
         <div><h5 className="text-[11px] font-bold uppercase tracking-wide text-brand-600 mb-3">Seguridad social y pagos</h5>
           <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="EPS"><Select value={edit.eps} onChange={e=>u('eps',e.target.value)} options={EPS_LIST}/></Field>
-            <Field label="Fondo de pensiones"><Select value={edit.afp} onChange={e=>u('afp',e.target.value)} options={AFP_LIST}/></Field>
-            <Field label="ARL"><Select value={edit.arl} onChange={e=>u('arl',e.target.value)} options={ARL_LIST}/></Field>
+            <Field label="EPS" hint="Si no aparece en las sugerencias, escríbela igual">
+              <Combo value={edit.eps} onChange={e=>u('eps',e.target.value)} options={EPS_LIST}/></Field>
+            <Field label="Fondo de pensiones"><Combo value={edit.afp} onChange={e=>u('afp',e.target.value)} options={AFP_LIST}/></Field>
+            <Field label="ARL"><Combo value={edit.arl} onChange={e=>u('arl',e.target.value)} options={ARL_LIST}/></Field>
             <Field label="Banco"><Input value={edit.banco} onChange={e=>u('banco',e.target.value)}/></Field>
             <div className="sm:col-span-2"><Field label="Número de cuenta"><Input value={edit.cuenta} onChange={e=>u('cuenta',e.target.value)}/></Field></div>
           </div></div>

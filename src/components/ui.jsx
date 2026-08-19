@@ -1,7 +1,7 @@
 /* ══════════════════════════════════════════════════════════════════════════
    BIBLIOTECA DE COMPONENTES  ·  portado literalmente desde el prototipo original
    ══════════════════════════════════════════════════════════════════════════ */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { iniciales, hoy } from '../lib/utils.js';
 
 export const ICONS = {
@@ -101,6 +101,18 @@ export const Select = ({options=[], ...p}) => <select className={IN} {...p}>
     ? <option key={o} value={o}>{o}</option>
     : <option key={o.v} value={o.v}>{o.l}</option>)}</select>;
 export const Area   = p => <textarea className={IN} rows="3" {...p}/>;
+
+// Input de texto con sugerencias (datalist nativo): permite escoger de la
+// lista o escribir un valor que no esté en ella (ej. EPS/AFP/ARL — las listas
+// oficiales cambian de un municipio a otro y nunca están 100% completas).
+let comboSeq = 0;
+export const Combo = ({options=[], id, ...p}) => {
+  const listId = useMemo(() => id || `combo-${++comboSeq}`, [id]);
+  return <>
+    <input className={IN} list={listId} autoComplete="off" {...p}/>
+    <datalist id={listId}>{options.map(o => <option key={o} value={o}/>)}</datalist>
+  </>;
+};
 
 export const Modal = ({open, onClose, title, sub, children, w='max-w-2xl', footer}) => {
   useEffect(()=>{ const h=e=>e.key==='Escape'&&onClose(); if(open){document.addEventListener('keydown',h);

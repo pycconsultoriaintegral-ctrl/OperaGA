@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Stat, Bar, Icon, Field, Input, exportCSV } from '../components/ui.jsx';
-import { CARGOS } from '../lib/constants.js';
 import { addDias, diffDias, fmtCOP, fmtNum, fmtFecha, hoy } from '../lib/utils.js';
 import { liquidar, valorizar } from '../lib/payroll.js';
 
@@ -175,7 +174,7 @@ export default function Reportes({db, toast}){
       </Table></Card>}
 
     {rep==='rotacion' && (()=>{
-      const porCargo = CARGOS.map(c => {
+      const porCargo = (db.cargos||[]).map(({nombre:c}) => {
         const es = db.empleados.filter(e=>e.cargo===c);
         const act = es.filter(e=>e.estado==='ACTIVO');
         const antig = act.length ? act.reduce((s,e)=>s+diffDias(e.ingreso,hoy()),0)/act.length : 0;
