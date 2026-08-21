@@ -164,13 +164,22 @@ export function useRemoteDB(toast){
     return () => { clearTimeout(timeoutId); supabase.removeChannel(channel); };
   }, [recargar]);
 
+  // Cola de sincronizaciones: dos `set()` seguidos (doble clic, clics rápidos
+  // en varias celdas) antes disparaban syncChanges() en paralelo, y la red
+  // podía entregar esas peticiones fuera de orden — el delete de la segunda
+  // llegaba antes que el insert de la primera y la fila vieja "revivía",
+  // chocando contra el unique (empleado_id, fecha) de `horarios`. Encolar
+  // aquí obliga a que cada sincronización espere a que termine la anterior,
+  // preservando el orden real en que se aplicaron los cambios de estado.
+  const syncQueueRef = useRef(Promise.resolve());
+
   const set = useCallback((fn) => {
     setDbState(prev => {
       const base = prev || dbRef.current;
       if (!base) return prev;
       const next = typeof fn === 'function' ? fn(base) : fn;
       dbRef.current = next;
-      syncChanges(base, next).catch(err => {
+      syncQueueRef.current = syncQueueRef.current.then(() => syncChanges(base, next)).catch(err => {
         console.error(err);
         toastRef.current?.('No se pudo guardar en la base de datos: ' + err.message, 'rose');
         recargar(); // revierte cualquier cambio optimista que no se haya podido guardar
