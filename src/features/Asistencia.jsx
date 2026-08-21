@@ -4,13 +4,17 @@ import { TIPOS_TIEMPO } from '../lib/constants.js';
 import { uid, hm2min, fmtNum, addDias, esDomingo, fmtFechaLarga, fmtFecha, nombreDia, hoy } from '../lib/utils.js';
 import { liquidar } from '../lib/payroll.js';
 
-export default function Asistencia({db, set, toast}){
+export default function Asistencia({db, set, toast, has}){
   const [fecha,setFecha] = useState(hoy());
   const [emp,setEmp] = useState('');
   const [edit,setEdit] = useState(null);
   const [tab,setTab] = useState('dia');
 
-  const activos = db.empleados.filter(e=>e.estado==='ACTIVO');
+  // Ver 'Alcance de acceso' en Empleados.jsx: Supervisor solo tiene permiso
+  // sobre 'empleados_publico', así que aquí también hay que usar esa vista
+  // en vez de la tabla completa para poder listar a todo el equipo.
+  const empleados = has?.('empleados','ver') ? db.empleados : (db.empleadosPublico||[]);
+  const activos = empleados.filter(e=>e.estado==='ACTIVO');
   const delDia = db.asistencia.filter(r => r.fecha===fecha && (!emp||r.empleado===emp))
     .sort((a,b)=>hm2min(a.entrada)-hm2min(b.entrada));
 
@@ -48,7 +52,7 @@ export default function Asistencia({db, set, toast}){
 
   return <Page title="Asistencia" sub="Registro y control de marcaciones con tipología de tiempos"
     actions={<><Btn v="outline" icon="download" onClick={()=>exportCSV('asistencia', db.asistencia.map(r=>({
-        fecha:r.fecha, empleado:db.empleados.find(e=>e.id===r.empleado)?.nombre,
+        fecha:r.fecha, empleado:empleados.find(e=>e.id===r.empleado)?.nombre,
         propiedad:db.propiedades.find(p=>p.id===r.propiedad)?.nombre||'',
         tipo:TIPOS_TIEMPO[r.tipo]?.label, entrada:r.entrada, salida:r.salida,
         horas:fmtNum(durMin(r)/60), metodo:r.metodo, observaciones:r.obs})))}>Exportar</Btn>
@@ -115,7 +119,7 @@ export default function Asistencia({db, set, toast}){
       {delDia.length===0 ? <Empty icon="clock" title="Sin marcaciones" sub="Registra la primera marcación del día."/>
       : <Table head={['Empleado','Tipo de tiempo','Entrada','Salida','Duración','Propiedad','Método','']}>
         {delDia.map(r => {
-          const e = db.empleados.find(x=>x.id===r.empleado); const t = TIPOS_TIEMPO[r.tipo];
+          const e = empleados.find(x=>x.id===r.empleado); const t = TIPOS_TIEMPO[r.tipo];
           const p = db.propiedades.find(x=>x.id===r.propiedad);
           return <tr key={r.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
             <Td><div className="flex items-center gap-2.5"><Avatar nombre={e?.nombre} size="w-7 h-7"/>

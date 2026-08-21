@@ -4,11 +4,16 @@ import { ESTADOS_PROP } from '../lib/constants.js';
 import { uid, diffDias, addDias, fmtCOP, fmtFecha, fmtNum, esDomingo, nombreDia, hoy } from '../lib/utils.js';
 import { supabase } from '../lib/supabaseClient.js';
 
-export default function Propiedades({db, set, toast, refrescar}){
+export default function Propiedades({db, set, toast, refrescar, has}){
   const [tab,setTab] = useState('props');
   const [edit,setEdit] = useState(null); const [editR,setEditR] = useState(null);
   const [verInactivas,setVerInactivas] = useState(false);
   const HOY = hoy();
+
+  // Ver 'Alcance de acceso' en Empleados.jsx: Supervisor solo tiene permiso
+  // sobre 'empleados_publico', así que aquí también hay que usar esa vista
+  // en vez de la tabla completa para poder listar mayordomos.
+  const empleados = has?.('empleados','ver') ? db.empleados : (db.empleadosPublico||[]);
 
   const activas = db.propiedades.filter(p=>p.estado!=='INACTIVA');
   const inactivas = db.propiedades.filter(p=>p.estado==='INACTIVA');
@@ -39,7 +44,7 @@ export default function Propiedades({db, set, toast, refrescar}){
     set(d=>({...d, reservas: n?[...d.reservas,r]:d.reservas.map(x=>x.id===r.id?r:x)}));
     setEditR(null); toast(n?'Reserva creada':'Reserva actualizada'); };
 
-  const mayordomos = db.empleados.filter(e=>e.cargo==='Mayordomo' && e.estado==='ACTIVO');
+  const mayordomos = empleados.filter(e=>e.cargo==='Mayordomo' && e.estado==='ACTIVO');
 
   const eliminarProp = async (p) => {
     const tieneReservas = db.reservas.some(r=>r.propiedad===p.id);
@@ -83,7 +88,7 @@ export default function Propiedades({db, set, toast, refrescar}){
 
     {tab==='props' && <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {propsListadas.map(p => {
-        const est = ESTADOS_PROP[p.estado]; const may = db.empleados.find(e=>e.id===p.mayordomo);
+        const est = ESTADOS_PROP[p.estado]; const may = empleados.find(e=>e.id===p.mayordomo);
         const rsv = db.reservas.find(r=>r.propiedad===p.id && r.desde<=HOY && r.hasta>=HOY);
         const prox = db.reservas.filter(r=>r.propiedad===p.id && r.desde>HOY).sort((a,b)=>a.desde.localeCompare(b.desde))[0];
         return <Card key={p.id} className="hover:shadow-lift transition-shadow">

@@ -3,14 +3,19 @@ import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select,
 import { TIPOS_NOVEDAD } from '../lib/constants.js';
 import { uid, hoy, diffDias, fmtFecha } from '../lib/utils.js';
 
-export default function Novedades({db, set, toast}){
+export default function Novedades({db, set, toast, has}){
   const [ft,setFt] = useState(''); const [fe,setFe] = useState('');
   const [edit,setEdit] = useState(null);
+
+  // Ver 'Alcance de acceso' en Empleados.jsx: Supervisor solo tiene permiso
+  // sobre 'empleados_publico', así que aquí también hay que usar esa vista
+  // en vez de la tabla completa para poder listar a todo el equipo.
+  const empleados = has?.('empleados','ver') ? db.empleados : (db.empleadosPublico||[]);
 
   const lista = db.novedades.filter(n => (!ft||n.tipo===ft) && (!fe||n.estado===fe))
     .sort((a,b)=>b.desde.localeCompare(a.desde));
 
-  const vacio = { id:'', empleado:db.empleados[0]?.id||'', tipo:'PERMISO', desde:hoy(), hasta:hoy(),
+  const vacio = { id:'', empleado:empleados[0]?.id||'', tipo:'PERMISO', desde:hoy(), hasta:hoy(),
                   dias:1, motivo:'', soporte:'', estado:'PENDIENTE' };
 
   const guardar = () => { if(!edit.motivo.trim()) return toast('El motivo es obligatorio','rose');
@@ -23,7 +28,7 @@ export default function Novedades({db, set, toast}){
     set(d=>({...d, novedades: d.novedades.map(x=>x.id===n.id?{...x,estado}:x),
       auditoria:[{id:uid(),fecha:new Date().toISOString().slice(0,16).replace('T',' '),
         usuario:'PYC Consultoria Integral SAS', accion: estado==='APROBADA'?'APROBAR':'RECHAZAR',
-        entidad:`Novedad ${n.id}`, detalle:`${TIPOS_NOVEDAD[n.tipo].label} — ${db.empleados.find(e=>e.id===n.empleado)?.nombre}`},...d.auditoria]}));
+        entidad:`Novedad ${n.id}`, detalle:`${TIPOS_NOVEDAD[n.tipo].label} — ${empleados.find(e=>e.id===n.empleado)?.nombre}`},...d.auditoria]}));
     toast(estado==='APROBADA'?'Novedad aprobada':'Novedad rechazada', estado==='APROBADA'?'emerald':'rose');
   };
 
@@ -33,7 +38,7 @@ export default function Novedades({db, set, toast}){
 
   return <Page title="Novedades" sub="Permisos, vacaciones, licencias, incapacidades y actos administrativos"
     actions={<><Btn v="outline" icon="download" onClick={()=>exportCSV('novedades', db.novedades.map(n=>({
-        empleado:db.empleados.find(e=>e.id===n.empleado)?.nombre, tipo:TIPOS_NOVEDAD[n.tipo].label,
+        empleado:empleados.find(e=>e.id===n.empleado)?.nombre, tipo:TIPOS_NOVEDAD[n.tipo].label,
         desde:n.desde, hasta:n.hasta, dias:n.dias, motivo:n.motivo, soporte:n.soporte, estado:n.estado})))}>Exportar</Btn>
       <Btn icon="plus" onClick={()=>setEdit(vacio)}>Nueva novedad</Btn></>}>
 
@@ -59,7 +64,7 @@ export default function Novedades({db, set, toast}){
       {lista.length===0 ? <Empty icon="doc" title="Sin novedades" sub="No hay registros con los filtros aplicados."/>
       : <Table head={['Empleado','Tipo','Período','Días','Motivo','Estado','']}>
         {lista.map(n => {
-          const e = db.empleados.find(x=>x.id===n.empleado); const t = TIPOS_NOVEDAD[n.tipo];
+          const e = empleados.find(x=>x.id===n.empleado); const t = TIPOS_NOVEDAD[n.tipo];
           const tone = n.estado==='APROBADA'?'emerald':n.estado==='PENDIENTE'?'amber':n.estado==='RECHAZADA'?'rose':'slate';
           return <tr key={n.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
             <Td><div className="flex items-center gap-2.5"><Avatar nombre={e?.nombre} size="w-8 h-8"/>
@@ -89,7 +94,7 @@ export default function Novedades({db, set, toast}){
       {edit && (()=>{const u=(k,v)=>setEdit({...edit,[k]:v}); const t=TIPOS_NOVEDAD[edit.tipo];
         return <div className="grid sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2"><Field label="Empleado" req><Select value={edit.empleado} onChange={e=>u('empleado',e.target.value)}
-          options={db.empleados.map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}`}))}/></Field></div>
+          options={empleados.map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}`}))}/></Field></div>
         <div className="sm:col-span-2"><Field label="Tipo de novedad"
           hint={t.remunerado?'Novedad remunerada — se paga al trabajador':'Novedad no remunerada — se descuenta'}>
           <Select value={edit.tipo} onChange={e=>u('tipo',e.target.value)}

@@ -13,7 +13,7 @@ const fmtFechaHora = iso => {
  *  consumen los 11 módulos (misma forma que el localStorage del prototipo). */
 async function fetchAll(){
   const [
-    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes, cargosRes,
+    cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes, cargosRes, empPublicoRes,
     ...tablaRes
   ] = await Promise.all([
     supabase.from('configuracion').select('*').eq('id', 1).maybeSingle(),
@@ -24,6 +24,10 @@ async function fetchAll(){
     supabase.from('roles').select('id,codigo,nombre,descripcion').order('id'),
     supabase.from('permisos').select('id,rol_id,modulo,ver,crear,editar,eliminar,exportar'),
     supabase.from('cargos').select('id,nombre').order('nombre'),
+    // Vista sin campos sensibles (salario, banco, EPS/AFP/ARL): la usan roles
+    // que solo tienen ver=true en 'empleados_publico' (ej. Supervisor), ya que
+    // la tabla `empleados` les bloquea todo salvo su propia fila (RLS).
+    supabase.from('empleados_publico').select('*'),
     ...TABLAS_SYNCABLES.map(key => supabase.from(TABLAS[key].table).select('*'))
   ]);
 
@@ -33,10 +37,13 @@ async function fetchAll(){
   // La tabla `cargos` es de la migración 0008: si todavía no se ha corrido en
   // este proyecto de Supabase, no tiene que tumbar el resto de la app.
   if (cargosRes.error) console.warn('Tabla `cargos` no disponible (¿falta correr la migración 0008?):', cargosRes.error.message);
+  // Igual con la vista `empleados_publico` sin RLS propia (migración 0009).
+  if (empPublicoRes.error) console.warn('Vista `empleados_publico` no disponible (¿falta correr la migración 0009?):', empPublicoRes.error.message);
 
   const db = {
     cfg: cfgFromRow(cfgRes.data),
-    festivos: (festivosRes.data || []).map(f => f.fecha)
+    festivos: (festivosRes.data || []).map(f => f.fecha),
+    empleadosPublico: (empPublicoRes.data || []).map(TABLAS.empleados.fromRow)
   };
   TABLAS_SYNCABLES.forEach((key, i) => {
     db[key] = (tablaRes[i].data || []).map(TABLAS[key].fromRow);

@@ -18,12 +18,17 @@ export default function Horarios({db, set, toast, perfil, has}){
   const [fcargo,setFcargo]=useState('');
   const cfg=db.cfg;
   const turnos=db.turnosT||[];
+  // Roles como Supervisor solo tienen ver=true en 'empleados_publico': la
+  // tabla `empleados` les bloquea todo salvo su propia fila (RLS), así que el
+  // programador de turnos usa la vista pública (sin salario/banco) para poder
+  // seguir mostrando a todo el equipo.
+  const empleados = has?.('empleados','ver') ? db.empleados : (db.empleadosPublico||[]);
   const turIdx=useMemo(()=>{const m={};turnos.forEach(t=>m[t.id]=t);return m;},[turnos]);
-  const empIdx=useMemo(()=>{const m={};db.empleados.forEach(e=>m[e.id]=e);return m;},[db.empleados]);
+  const empIdx=useMemo(()=>{const m={};empleados.forEach(e=>m[e.id]=e);return m;},[empleados]);
 
   const dias=useMemo(()=>Array.from({length:7},(_,i)=>addDias(ini,i)),[ini]);
-  const activos=useMemo(()=>db.empleados.filter(e=>e.estado==='ACTIVO'
-    &&(!fcargo||e.cargo===fcargo)),[db.empleados,fcargo]);
+  const activos=useMemo(()=>empleados.filter(e=>e.estado==='ACTIVO'
+    &&(!fcargo||e.cargo===fcargo)),[empleados,fcargo]);
 
   const horIdx=useMemo(()=>{const m={};(db.horarios||[]).forEach(h=>m[h.emp+'|'+h.fecha]=h);return m;},[db.horarios]);
   const progDe=(eid,f)=>horIdx[eid+'|'+f];
@@ -86,7 +91,7 @@ export default function Horarios({db, set, toast, perfil, has}){
     setEditT(null); toast(n?'Turno creado':'Turno actualizado');
   };
 
-  const cargos=[...new Set(db.empleados.map(e=>e.cargo))];
+  const cargos=[...new Set(empleados.map(e=>e.cargo))];
   const totalComp=comps.reduce((s,c)=>s+Math.max(0,c.saldo),0);
 
   // Cuenta autoservicio (vinculada a un empleado) sin permiso de editar

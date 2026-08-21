@@ -4,16 +4,23 @@ import { CONFIG_DEFAULT, EPS_LIST, AFP_LIST, ARL_LIST } from '../lib/constants.j
 import { uid, fmtCOP, fmtFecha, edad, diffDias, hoy } from '../lib/utils.js';
 import { supabase } from '../lib/supabaseClient.js';
 
-export default function Empleados({db, set, toast}){
+export default function Empleados({db, set, toast, has}){
   const [q,setQ] = useState(''); const [fc,setFc] = useState('');
   const [sel,setSel] = useState(null); const [edit,setEdit] = useState(null);
   const [subiendoFoto,setSubiendoFoto] = useState(false);
 
+  // Roles como Supervisor solo tienen ver=true en 'empleados_publico': la
+  // tabla `empleados` les bloquea todo salvo su propia fila (RLS), así que
+  // usan la vista sin salario/banco/EPS/AFP/ARL en su lugar.
+  const verTodo = has?.('empleados','ver');
+  const puedeEscribir = has?.('empleados','crear') || has?.('empleados','editar');
+  const fuente = verTodo ? db.empleados : (db.empleadosPublico||[]);
+
   const cargos = useMemo(() => (db.cargos||[]).map(c=>c.nombre), [db.cargos]);
 
-  const lista = useMemo(() => db.empleados.filter(e =>
+  const lista = useMemo(() => fuente.filter(e =>
     (!q || e.nombre.toLowerCase().includes(q.toLowerCase()) || e.doc.includes(q)) &&
-    (!fc || e.cargo===fc)), [db.empleados,q,fc]);
+    (!fc || e.cargo===fc)), [fuente,q,fc]);
 
   const vacio = () => ({ id:uid(), nombre:'', doc:'', tipoDoc:'CC', cargo:cargos[0]||'', nacimiento:'', tel:'', email:'',
     dir:'', ingreso:hoy(), contrato:'Término indefinido', salario:CONFIG_DEFAULT.salarioMinimo, bonificacion:0,
@@ -45,11 +52,13 @@ export default function Empleados({db, set, toast}){
     setSel(null); toast(e.estado==='ACTIVO'?'Empleado inactivado':'Empleado reactivado');
   };
 
-  return <Page title="Empleados" sub={`${db.empleados.filter(e=>e.estado==='ACTIVO').length} activos de ${db.empleados.length} registrados`}
-    actions={<><Btn v="outline" icon="download" onClick={()=>exportCSV('empleados', db.empleados.map(e=>({
+  return <Page title="Empleados" sub={`${fuente.filter(e=>e.estado==='ACTIVO').length} activos de ${fuente.length} registrados`}
+    actions={<><Btn v="outline" icon="download" onClick={()=>exportCSV('empleados', fuente.map(e=> verTodo ? ({
         nombre:e.nombre,documento:e.doc,cargo:e.cargo,ingreso:e.ingreso,contrato:e.contrato,
-        salario:e.salario,eps:e.eps,afp:e.afp,arl:e.arl,telefono:e.tel,estado:e.estado})))}>Exportar</Btn>
-      <Btn icon="plus" onClick={()=>setEdit(vacio())}>Nuevo empleado</Btn></>}>
+        salario:e.salario,eps:e.eps,afp:e.afp,arl:e.arl,telefono:e.tel,estado:e.estado}) : ({
+        nombre:e.nombre,documento:e.doc,cargo:e.cargo,ingreso:e.ingreso,contrato:e.contrato,
+        telefono:e.tel,estado:e.estado})))}>Exportar</Btn>
+      {puedeEscribir && <Btn icon="plus" onClick={()=>setEdit(vacio())}>Nuevo empleado</Btn>}</>}>
 
     <Card pad={false}>
       <div className="p-4 flex flex-col sm:flex-row gap-2.5 border-b border-ink-200 dark:border-ink-800">
@@ -62,7 +71,9 @@ export default function Empleados({db, set, toast}){
       </div>
 
       {lista.length===0 ? <Empty icon="users" title="Sin resultados" sub="Ajusta los filtros o crea un nuevo empleado."/>
-      : <Table head={['Empleado','Cargo','Contrato','Salario','Seguridad social','Estado','']}>
+      : <Table head={verTodo
+          ? ['Empleado','Cargo','Contrato','Salario','Seguridad social','Estado','']
+          : ['Empleado','Cargo','Contrato','Estado','']}>
         {lista.map(e => (
           <tr key={e.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40 transition-colors">
             <Td>
@@ -75,12 +86,12 @@ export default function Empleados({db, set, toast}){
               <Badge tone={e.cargo==='Mayordomo'?'brand':e.cargo==='Supervisor'?'violet':'sky'}>{e.cargo}</Badge>
               {e.interno && <Badge tone="amber">Interno</Badge>}</div></Td>
             <Td><p className="text-xs">{e.contrato}</p><p className="text-[11px] text-ink-400">Desde {fmtFecha(e.ingreso)}</p></Td>
-            <Td className="font-bold num">{fmtCOP(e.salario)}</Td>
-            <Td><p className="text-[11px] leading-relaxed">{e.eps}<br/><span className="text-ink-400">{e.afp} · {e.arl}</span></p></Td>
+            {verTodo && <Td className="font-bold num">{fmtCOP(e.salario)}</Td>}
+            {verTodo && <Td><p className="text-[11px] leading-relaxed">{e.eps}<br/><span className="text-ink-400">{e.afp} · {e.arl}</span></p></Td>}
             <Td><Badge tone={e.estado==='ACTIVO'?'emerald':'slate'} dot>{e.estado==='ACTIVO'?'Activo':'Inactivo'}</Badge></Td>
             <Td className="text-right whitespace-nowrap">
               <button onClick={()=>setSel(e)} className="p-1.5 rounded-lg text-ink-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10"><Icon n="doc" c="w-4 h-4"/></button>
-              <button onClick={()=>setEdit(e)} className="p-1.5 rounded-lg text-ink-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10"><Icon n="edit" c="w-4 h-4"/></button>
+              {puedeEscribir && <button onClick={()=>setEdit(e)} className="p-1.5 rounded-lg text-ink-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10"><Icon n="edit" c="w-4 h-4"/></button>}
             </Td>
           </tr>))}
       </Table>}
@@ -88,7 +99,7 @@ export default function Empleados({db, set, toast}){
 
     {/* ── Hoja de vida ── */}
     <Modal open={!!sel} onClose={()=>setSel(null)} title="Hoja de vida" sub={sel?.nombre} w="max-w-3xl"
-      footer={sel && <><Btn v={sel.estado==='ACTIVO'?'danger':'outline'} onClick={()=>inactivar(sel)}>
+      footer={sel && puedeEscribir && <><Btn v={sel.estado==='ACTIVO'?'danger':'outline'} onClick={()=>inactivar(sel)}>
           {sel.estado==='ACTIVO'?'Inactivar (borrado lógico)':'Reactivar'}</Btn>
         <Btn v="outline" onClick={()=>{setEdit(sel);setSel(null);}} icon="edit">Editar</Btn></>}>
       {sel && <div className="space-y-5">
@@ -105,13 +116,14 @@ export default function Empleados({db, set, toast}){
           </div>
         </div>
         {[['Datos personales',[['Fecha de nacimiento',fmtFecha(sel.nacimiento)],['Edad',edad(sel.nacimiento)+' años'],
-            ['Teléfono',sel.tel],['Correo',sel.email],['Dirección',sel.dir],['Contacto de emergencia',sel.contactoEmg]]],
+            ['Teléfono',sel.tel],['Correo',sel.email],['Dirección',sel.dir],
+            ...(verTodo?[['Contacto de emergencia',sel.contactoEmg]]:[])]],
           ['Vínculo laboral',[['Cargo',sel.cargo],['Tipo de contrato',sel.contrato],['Fecha de ingreso',fmtFecha(sel.ingreso)],
-            ['Salario básico',fmtCOP(sel.salario)],['Bonificación',fmtCOP(sel.bonificacion)],
-            ['Valor hora',fmtCOP(sel.salario/db.cfg.divisorHora)],
+            ...(verTodo?[['Salario básico',fmtCOP(sel.salario)],['Bonificación',fmtCOP(sel.bonificacion)],
+            ['Valor hora',fmtCOP(sel.salario/db.cfg.divisorHora)]]:[]),
             ['Modalidad',sel.interno?'Interno (alojado en propiedad)':'Externo']]],
-          ['Seguridad social',[['EPS',sel.eps],['Fondo de pensiones',sel.afp],['ARL',sel.arl],
-            ['Banco',sel.banco||'—'],['Cuenta',sel.cuenta||'—']]]
+          ...(verTodo?[['Seguridad social',[['EPS',sel.eps],['Fondo de pensiones',sel.afp],['ARL',sel.arl],
+            ['Banco',sel.banco||'—'],['Cuenta',sel.cuenta||'—']]]]:[])
         ].map(([titulo,filas]) => (
           <div key={titulo}>
             <h5 className="text-[11px] font-bold uppercase tracking-wide text-ink-500 mb-2.5">{titulo}</h5>
