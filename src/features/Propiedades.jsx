@@ -7,11 +7,20 @@ import { supabase } from '../lib/supabaseClient.js';
 export default function Propiedades({db, set, toast, refrescar}){
   const [tab,setTab] = useState('props');
   const [edit,setEdit] = useState(null); const [editR,setEditR] = useState(null);
+  const [verInactivas,setVerInactivas] = useState(false);
   const HOY = hoy();
+
+  const activas = db.propiedades.filter(p=>p.estado!=='INACTIVA');
+  const inactivas = db.propiedades.filter(p=>p.estado==='INACTIVA');
+  const propsListadas = verInactivas ? db.propiedades : activas;
+  // Para los selects de reserva/estadía: solo propiedades activas, salvo que la
+  // que ya esté elegida sea una inactiva (para no perderla al editar un registro viejo).
+  const propsParaSeleccionar = (idActual) => idActual && inactivas.some(p=>p.id===idActual)
+    ? db.propiedades : activas;
 
   const vacio  = { id:'', nombre:'', codigo:'', tipo:'Casa', ubicacion:'', capacidad:4, habitaciones:2, banos:2,
                    estado:'DISPONIBLE', mayordomo:'', tarifa:500000, notas:'', lat:'', lng:'', ipsTexto:'' };
-  const vacioR = { id:'', propiedad:db.propiedades[0]?.id||'', huesped:'', desde:hoy(), hasta:addDias(hoy(),3),
+  const vacioR = { id:'', propiedad:activas[0]?.id||'', huesped:'', desde:hoy(), hasta:addDias(hoy(),3),
                    huespedes:2, canal:'Airbnb', valor:0, estado:'CONFIRMADA' };
 
   const guardar = () => {
@@ -45,18 +54,35 @@ export default function Propiedades({db, set, toast, refrescar}){
     }catch(e){ toast('No se pudo eliminar: tiene registros asociados (asistencia, horarios u otros). '+e.message,'rose'); }
   };
 
-  return <Page title="Propiedades" sub={`${db.propiedades.length} inmuebles · ${db.reservas.filter(r=>r.estado!=='FINALIZADA').length} reservas activas`}
+  // Ocultar conserva la propiedad y todo su historial (reservas, estadías,
+  // reportes): solo la saca de las vistas operativas y de los selectores de
+  // "nueva reserva/estadía". Reactivar la vuelve a mostrar donde estaba.
+  const toggleOcultar = (p) => {
+    const ocultando = p.estado !== 'INACTIVA';
+    set(d=>({...d, propiedades: d.propiedades.map(x=>x.id===p.id
+      ? {...x, estado: ocultando ? 'INACTIVA' : 'DISPONIBLE'} : x)}));
+    toast(ocultando ? `"${p.nombre}" ocultada` : `"${p.nombre}" reactivada`);
+  };
+
+  return <Page title="Propiedades" sub={`${activas.length} inmuebles · ${db.reservas.filter(r=>r.estado!=='FINALIZADA').length} reservas activas`}
     actions={tab==='props'
       ? <Btn icon="plus" onClick={()=>setEdit(vacio)}>Nueva propiedad</Btn>
       : <Btn icon="plus" onClick={()=>setEditR(vacioR)}>Nueva reserva</Btn>}>
 
-    <div className="mb-5"><Tabs active={tab} onChange={setTab} tabs={[
-      {id:'props',label:'Inmuebles',count:db.propiedades.length},
-      {id:'reservas',label:'Reservas',count:db.reservas.length},
-      {id:'calendario',label:'Calendario'}]}/></div>
+    <div className="mb-5 flex items-center justify-between flex-wrap gap-3">
+      <Tabs active={tab} onChange={setTab} tabs={[
+        {id:'props',label:'Inmuebles',count:activas.length},
+        {id:'reservas',label:'Reservas',count:db.reservas.length},
+        {id:'calendario',label:'Calendario'}]}/>
+      {tab==='props' && inactivas.length>0 &&
+        <label className="flex items-center gap-2 text-xs font-semibold text-ink-500 dark:text-ink-400 cursor-pointer select-none">
+          <input type="checkbox" checked={verInactivas} onChange={e=>setVerInactivas(e.target.checked)}/>
+          Mostrar ocultas ({inactivas.length})
+        </label>}
+    </div>
 
     {tab==='props' && <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-      {db.propiedades.map(p => {
+      {propsListadas.map(p => {
         const est = ESTADOS_PROP[p.estado]; const may = db.empleados.find(e=>e.id===p.mayordomo);
         const rsv = db.reservas.find(r=>r.propiedad===p.id && r.desde<=HOY && r.hasta>=HOY);
         const prox = db.reservas.filter(r=>r.propiedad===p.id && r.desde>HOY).sort((a,b)=>a.desde.localeCompare(b.desde))[0];
@@ -88,7 +114,11 @@ export default function Propiedades({db, set, toast, refrescar}){
           </div>
           <div className="mt-4 flex gap-2">
             <Btn v="outline" s="sm" icon="edit" onClick={()=>setEdit({...p, lat:p.lat??'', lng:p.lng??'', ipsTexto:(p.ips||[]).join(', ')})} className="flex-1">Editar</Btn>
-            <Btn v="soft" s="sm" icon="calendar" onClick={()=>{setEditR({...vacioR,propiedad:p.id});}} className="flex-1">Reservar</Btn>
+            {p.estado!=='INACTIVA' &&
+              <Btn v="soft" s="sm" icon="calendar" onClick={()=>{setEditR({...vacioR,propiedad:p.id});}} className="flex-1">Reservar</Btn>}
+            <button onClick={()=>toggleOcultar(p)} title={p.estado==='INACTIVA'?'Reactivar propiedad':'Ocultar propiedad (conserva su historial)'}
+              className="p-2 rounded-lg text-ink-300 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 shrink-0">
+              <Icon n={p.estado==='INACTIVA'?'eye':'eye-off'} c="w-4 h-4"/></button>
             <button onClick={()=>eliminarProp(p)} title="Eliminar propiedad"
               className="p-2 rounded-lg text-ink-300 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 shrink-0">
               <Icon n="trash" c="w-4 h-4"/></button>
@@ -184,7 +214,7 @@ export default function Propiedades({db, set, toast, refrescar}){
       footer={<><Btn v="outline" onClick={()=>setEditR(null)}>Cancelar</Btn><Btn onClick={guardarR} icon="check">Guardar</Btn></>}>
       {editR && (()=>{const u=(k,v)=>setEditR({...editR,[k]:v}); return <div className="grid sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2"><Field label="Propiedad"><Select value={editR.propiedad} onChange={e=>u('propiedad',e.target.value)}
-          options={db.propiedades.map(p=>({v:p.id,l:p.nombre}))}/></Field></div>
+          options={propsParaSeleccionar(editR.propiedad).map(p=>({v:p.id,l:p.nombre}))}/></Field></div>
         <div className="sm:col-span-2"><Field label="Huésped" req><Input value={editR.huesped} onChange={e=>u('huesped',e.target.value)}/></Field></div>
         <Field label="Check-in"><Input type="date" value={editR.desde} onChange={e=>u('desde',e.target.value)}/></Field>
         <Field label="Check-out"><Input type="date" value={editR.hasta} onChange={e=>u('hasta',e.target.value)}/></Field>

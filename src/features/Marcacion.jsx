@@ -168,7 +168,7 @@ export default function Marcacion({db, set, toast, perfil}){
           </Field></div>
           <div className="sm:col-span-2"><Field label="Propiedad" req>
             <Select value={prop} onChange={e=>setProp(e.target.value)}
-              options={[{v:'',l:'Selecciona…'},...db.propiedades.map(p=>({v:p.id,l:`${p.nombre} (${p.codigo})`}))]}/></Field></div>
+              options={[{v:'',l:'Selecciona…'},...db.propiedades.filter(p=>p.estado!=='INACTIVA').map(p=>({v:p.id,l:`${p.nombre} (${p.codigo})`}))]}/></Field></div>
           <div className="sm:col-span-2"><Field label="Tipo de tiempo" hint={TIPOS_TIEMPO[tipo]?.desc}>
             <Select value={tipo} onChange={e=>setTipo(e.target.value)}
               options={Object.values(TIPOS_TIEMPO).map(x=>({v:x.id,l:x.label}))}/></Field></div>
@@ -295,7 +295,7 @@ export default function Marcacion({db, set, toast, perfil}){
           <h3 className="font-bold text-ink-900 dark:text-white">Códigos y geocerca por propiedad</h3>
           <p className="text-xs text-ink-500">Imprime el QR y fíjalo en un lugar visible dentro de cada propiedad</p></div>
         <Table head={['Propiedad','Código','Coordenadas','IPs registradas','']}>
-          {db.propiedades.map(p => (
+          {db.propiedades.filter(p=>p.estado!=='INACTIVA').map(p => (
             <tr key={p.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
               <Td className="font-bold">{p.nombre}<p className="text-[11px] text-ink-400 font-normal">{p.ubicacion}</p></Td>
               <Td><Badge tone="brand">{p.codigo}</Badge></Td>

@@ -5,7 +5,8 @@ import { addDias, esDomingo, fmtNum, fmtCOP, fmtFechaLarga, fmtFecha, nombreDia,
 import { liquidar, valorizar } from '../lib/payroll.js';
 
 export default function Dashboard({db, go}){
-  const { empleados, propiedades, reservas, asistencia, novedades, cfg, festivos } = db;
+  const { empleados, reservas, asistencia, novedades, cfg, festivos } = db;
+  const propiedades = db.propiedades.filter(p=>p.estado!=='INACTIVA');
   const HOY = hoy();
 
   const m = useMemo(() => {

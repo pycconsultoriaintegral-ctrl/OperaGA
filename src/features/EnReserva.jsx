@@ -19,7 +19,13 @@ export default function EnReserva({db, set, toast}){
   const lista = tab==='activas' ? porEstado('ACTIVA')
               : tab==='programadas' ? porEstado('PROGRAMADA') : porEstado('FINALIZADA');
 
-  const vacio = { id:'', empleado:db.empleados.find(e=>e.interno)?.id||'', propiedad:db.propiedades[0]?.id||'',
+  const propsActivas = db.propiedades.filter(p=>p.estado!=='INACTIVA');
+  // Al editar una estadía vieja hay que poder seguir viendo su propiedad aunque
+  // ya esté oculta — solo las nuevas asignaciones se limitan a las activas.
+  const propsParaSeleccionar = idActual => (idActual && !propsActivas.some(p=>p.id===idActual))
+    ? db.propiedades : propsActivas;
+
+  const vacio = { id:'', empleado:db.empleados.find(e=>e.interno)?.id||'', propiedad:propsActivas[0]?.id||'',
                   reserva:'', desde:hoy(), hasta:addDias(hoy(),5), estado:'PROGRAMADA', obs:'' };
 
   const guardar = () => {
@@ -219,7 +225,7 @@ export default function EnReserva({db, set, toast}){
             options={db.empleados.filter(e=>e.estado==='ACTIVO').map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}${e.interno?' (interno)':''}`}))}/></Field></div>
         <div className="sm:col-span-2"><Field label="Propiedad" req>
           <Select value={edit.propiedad} onChange={e=>u('propiedad',e.target.value)}
-            options={db.propiedades.map(p=>({v:p.id,l:p.nombre}))}/></Field></div>
+            options={propsParaSeleccionar(edit.propiedad).map(p=>({v:p.id,l:p.nombre}))}/></Field></div>
         <div className="sm:col-span-2"><Field label="Reserva asociada">
           <Select value={edit.reserva} onChange={e=>u('reserva',e.target.value)}
             options={[{v:'',l:'Sin reserva asociada'},...db.reservas.map(r=>({v:r.id,
