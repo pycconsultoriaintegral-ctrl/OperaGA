@@ -74,7 +74,12 @@ export const TABLAS = {
   horarios: {
     table: 'horarios',
     fromRow: r => ({ id: r.id, emp: r.empleado_id, fecha: r.fecha, tur: r.turno_id }),
-    toRow: o => ({ empleado_id: o.emp, fecha: o.fecha, turno_id: o.tur })
+    toRow: o => ({ empleado_id: o.emp, fecha: o.fecha, turno_id: o.tur }),
+    // Dos sesiones editando el mismo empleado+fecha al mismo tiempo pueden
+    // producir dos inserts "nuevos" (id distinto) para la misma llave natural
+    // — onConflict hace que el segundo se resuelva como UPDATE en vez de
+    // reventar el unique (empleado_id, fecha). Ver syncTabla en useRemoteDB.js.
+    onConflict: 'empleado_id,fecha'
   },
 
   asistencia: {

@@ -33,29 +33,43 @@ export default function Horarios({db, set, toast, perfil, has}){
   const horIdx=useMemo(()=>{const m={};(db.horarios||[]).forEach(h=>m[h.emp+'|'+h.fecha]=h);return m;},[db.horarios]);
   const progDe=(eid,f)=>horIdx[eid+'|'+f];
 
+  // IMPORTANTE: cuando la celda YA tenía un turno asignado, hay que
+  // conservar su `id` y solo cambiar `tur` (UPDATE) en vez de borrar esa fila
+  // e insertar una con id nuevo. Borrar+insertar para lo mismo que ya existía
+  // abre una ventana de carrera entre el delete y el insert (dos clics
+  // rápidos, o dos personas editando horarios al mismo tiempo) que revienta
+  // el unique (empleado_id, fecha) — el error "horarios_empleado_id_fecha_key".
   const asignar=(eid,f)=>{
     const ex=progDe(eid,f);
     set(d=>{
-      const hs=(d.horarios||[]).filter(h=>!(h.emp===eid&&h.fecha===f));
-      if(ex&&ex.tur===pincel) return {...d,horarios:hs};
-      return {...d,horarios:[...hs,{id:uid(),emp:eid,fecha:f,tur:pincel}]};
+      if(ex&&ex.tur===pincel)  // mismo turno de nuevo: quitarlo
+        return {...d,horarios:(d.horarios||[]).filter(h=>!(h.emp===eid&&h.fecha===f))};
+      if(ex)  // ya tenía otro turno: solo actualizarlo, mismo id
+        return {...d,horarios:d.horarios.map(h=>(h.emp===eid&&h.fecha===f)?{...h,tur:pincel}:h)};
+      return {...d,horarios:[...(d.horarios||[]),{id:uid(),emp:eid,fecha:f,tur:pincel}]};
     });
   };
   const aplicarFila=eid=>{
     set(d=>{
-      const hs=(d.horarios||[]).filter(h=>!(h.emp===eid&&dias.includes(h.fecha)));
-      return {...d,horarios:[...hs,...dias.map(f=>({id:uid(),emp:eid,fecha:f,tur:pincel}))]};
+      const existentes={};
+      (d.horarios||[]).forEach(h=>{ if(h.emp===eid&&dias.includes(h.fecha)) existentes[h.fecha]=h; });
+      const otros=(d.horarios||[]).filter(h=>!(h.emp===eid&&dias.includes(h.fecha)));
+      const nuevos=dias.map(f=>existentes[f]?{...existentes[f],tur:pincel}:{id:uid(),emp:eid,fecha:f,tur:pincel});
+      return {...d,horarios:[...otros,...nuevos]};
     });
     toast('Semana aplicada');
   };
   const copiarSemana=()=>{
     const dest=Array.from({length:7},(_,i)=>addDias(ini,7+i));
     set(d=>{
-      const hs=(d.horarios||[]).filter(h=>!dest.includes(h.fecha));
+      const existentes={};
+      (d.horarios||[]).forEach(h=>{ if(dest.includes(h.fecha)) existentes[h.emp+'|'+h.fecha]=h; });
+      const otros=(d.horarios||[]).filter(h=>!dest.includes(h.fecha));
       const nuevos=[];
       dias.forEach((f,i)=>(d.horarios||[]).filter(h=>h.fecha===f)
-        .forEach(h=>nuevos.push({id:uid(),emp:h.emp,fecha:dest[i],tur:h.tur})));
-      return {...d,horarios:[...hs,...nuevos]};
+        .forEach(h=>{ const key=h.emp+'|'+dest[i]; const ex=existentes[key];
+          nuevos.push(ex?{...ex,tur:h.tur}:{id:uid(),emp:h.emp,fecha:dest[i],tur:h.tur}); }));
+      return {...d,horarios:[...otros,...nuevos]};
     });
     toast('Semana copiada a la siguiente');
   };

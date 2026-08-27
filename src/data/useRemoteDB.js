@@ -82,7 +82,7 @@ async function fetchAll(){
 /** Sincroniza una tabla insertando/actualizando/eliminando solo lo que cambió
  *  entre `prevRows` y `nextRows` (comparados por `id`). */
 async function syncTabla(key, prevRows, nextRows){
-  const { table, toRow } = TABLAS[key];
+  const { table, toRow, onConflict } = TABLAS[key];
   const prevMap = new Map(prevRows.map(r => [r.id, r]));
   const nextMap = new Map(nextRows.map(r => [r.id, r]));
 
@@ -104,7 +104,20 @@ async function syncTabla(key, prevRows, nextRows){
     const { error } = await supabase.from(table).update(rest).eq('id', id);
     if (error) throw error;
   }
-  if (inserts.length) { const { error } = await supabase.from(table).insert(inserts); if (error) throw error; }
+  if (inserts.length) {
+    // Con onConflict (ej. horarios: empleado_id+fecha), dos sesiones creando
+    // "algo nuevo" para la misma llave natural al mismo tiempo se resuelven
+    // como UPDATE en vez de reventar el unique — red de seguridad además del
+    // manejo por id que ya hace cada módulo (ver Horarios.jsx `asignar`).
+    // Nota: en ese choque puntual el `id` de la fila que sobrevive queda
+    // siendo el de quien ganó la carrera, no el de esta sesión; el estado
+    // local se recompone solo con el siguiente refresco (la suscripción
+    // Realtime a `horarios` ya dispara uno).
+    const { error } = onConflict
+      ? await supabase.from(table).upsert(inserts, { onConflict })
+      : await supabase.from(table).insert(inserts);
+    if (error) throw error;
+  }
 }
 
 async function syncFestivos(prevFestivos, nextFestivos){
