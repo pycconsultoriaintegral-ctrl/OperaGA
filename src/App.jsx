@@ -52,7 +52,7 @@ export default function App(){
     </Pantalla>
   );
 
-  return <AppShell perfil={perfil} rol={rol} has={has} onLogout={signOut}/>;
+  return <AppShell perfil={perfil} rol={rol} has={has} onLogout={signOut} userId={session.user.id}/>;
 }
 
 function Pantalla({ msg, children }){
@@ -64,7 +64,7 @@ function Pantalla({ msg, children }){
   </div>;
 }
 
-function AppShell({ perfil, rol, has, onLogout }){
+function AppShell({ perfil, rol, has, onLogout, userId }){
   // Si el enlace trae ?marcar=CODIGO (viene de escanear el QR fijo de una
   // propiedad), abre directo en Marcación en vez del Panel de control.
   const [vista,setVista] = useState(() =>
@@ -72,7 +72,7 @@ function AppShell({ perfil, rol, has, onLogout }){
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();
-  const { db, set, loading: dbLoading, refrescar } = useRemoteDB(toast, session?.user?.id);
+  const { db, set, loading: dbLoading, refrescar } = useRemoteDB(toast, userId);
 
   useEffect(()=>{ document.documentElement.classList.toggle('dark',dark);
     try{localStorage.setItem('opera_dark',dark?'1':'0');}catch(e){} },[dark]);
