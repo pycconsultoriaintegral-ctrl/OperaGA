@@ -150,12 +150,14 @@ async function syncChanges(prevDb, nextDb){
  * segundo plano, y refresco automático por Realtime cuando otro usuario
  * cambia algo — así todos ven la misma información sin recargar la página.
  */
-export function useRemoteDB(toast){
+export function useRemoteDB(toast, userId){
   const [db, setDbState] = useState(null);
   const [loading, setLoading] = useState(true);
   const dbRef = useRef(null);
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   // Cada set() local incrementa esto. El refresco automático por Realtime
   // (recargar) tarda un rato en ir y volver a Supabase — si mientras tanto
@@ -202,9 +204,28 @@ export function useRemoteDB(toast){
     let timeoutId = null;
     const debounceRecargar = () => { clearTimeout(timeoutId); timeoutId = setTimeout(recargar, 400); };
 
+    // Encolar los recargar() (arriba) evita que se resuelvan fuera de orden
+    // entre sí, pero no evita el caso más común: esta MISMA sesión recibe el
+    // aviso Realtime de su PROPIO guardado exitoso y se recarga a sí misma
+    // ~400ms después — si para entonces ya hizo otro clic optimista más
+    // reciente, ese recargar "propio" igual competía con él. La causa de
+    // fondo es innecesaria: si el cambio lo hizo esta sesión, ya lo tiene
+    // reflejado optimistamente, no necesita recargar nada. `created_by`/
+    // `updated_by` dicen quién hizo cada insert/update — si coincide con el
+    // usuario actual, se ignora el evento; recargar() solo se dispara ante
+    // cambios de OTRA persona u otro dispositivo.
+    const esCambioPropio = payload => {
+      const fila = payload.new || payload.old;
+      const autor = fila?.updated_by ?? fila?.created_by;
+      return autor && userIdRef.current && autor === userIdRef.current;
+    };
+
     const channel = supabase.channel('opera-realtime');
     tablasRealtime.forEach(table => {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table }, debounceRecargar);
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, payload => {
+        if (esCambioPropio(payload)) return;
+        debounceRecargar();
+      });
     });
     channel.subscribe();
 

@@ -72,7 +72,7 @@ function AppShell({ perfil, rol, has, onLogout }){
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();
-  const { db, set, loading: dbLoading, refrescar } = useRemoteDB(toast);
+  const { db, set, loading: dbLoading, refrescar } = useRemoteDB(toast, session?.user?.id);
 
   useEffect(()=>{ document.documentElement.classList.toggle('dark',dark);
     try{localStorage.setItem('opera_dark',dark?'1':'0');}catch(e){} },[dark]);
