@@ -167,17 +167,32 @@ export function useRemoteDB(toast){
   // guardado de esa edición dispara su propio recargar() más adelante.
   const genRef = useRef(0);
 
-  const recargar = useCallback(async () => {
+  // Con clics rápidos en varias celdas, cada guardado dispara su propio
+  // evento Realtime y por lo tanto su propio recargar() ~400ms después. Si
+  // uno de esos fetches tarda más que el siguiente, podían resolver fuera de
+  // orden: el más lento (con una foto más vieja) llegaba DESPUÉS del más
+  // rápido y pisaba una celda recién asignada, hacía que "no se quedara
+  // seleccionada" sin ningún error visible. Encolar los recargar() (igual
+  // que ya se hace con los guardados en `set`) obliga a que cada fetch
+  // empiece solo cuando el anterior ya terminó, así siempre se aplican en
+  // el mismo orden en que se dispararon.
+  const recargarQueueRef = useRef(Promise.resolve());
+
+  const recargar = useCallback(() => {
     const startGen = genRef.current;
-    try {
-      const fresh = await fetchAll();
-      if (genRef.current !== startGen) return; // hubo una edición local durante el fetch: descartar esta foto vieja
-      dbRef.current = fresh;
-      setDbState(fresh);
-    } catch (err) {
-      console.error(err);
-      toastRef.current?.('No se pudo cargar la información: ' + err.message, 'rose');
-    }
+    const p = recargarQueueRef.current.then(async () => {
+      try {
+        const fresh = await fetchAll();
+        if (genRef.current !== startGen) return; // hubo una edición local durante el fetch: descartar esta foto vieja
+        dbRef.current = fresh;
+        setDbState(fresh);
+      } catch (err) {
+        console.error(err);
+        toastRef.current?.('No se pudo cargar la información: ' + err.message, 'rose');
+      }
+    });
+    recargarQueueRef.current = p;
+    return p;
   }, []);
 
   useEffect(() => {
