@@ -4,7 +4,7 @@ import { TIPOS_TIEMPO, METODOS, VALIDACION } from '../lib/constants.js';
 import { uid, pad, fmtFecha, hoy } from '../lib/utils.js';
 import { validarMarcacion, distanciaMt } from '../lib/geo.js';
 
-export default function Marcacion({db, set, toast, perfil}){
+export default function Marcacion({db, set, toast, perfil, has}){
   const propio = perfil?.empleado_id || perfil?.empleadoId || '';
   const [tab,setTab] = useState('kiosco');
   const [emp,setEmp] = useState(propio);
@@ -19,9 +19,14 @@ export default function Marcacion({db, set, toast, perfil}){
   const [qrProp,setQrProp] = useState(null);
   const videoRef = useRef(null), canvasRef = useRef(null), qrRef = useRef(null);
 
-  const activos = db.empleados.filter(e=>e.estado==='ACTIVO');
+  // Ver 'Alcance de acceso' en Empleados.jsx: Supervisor solo tiene permiso
+  // sobre 'empleados_publico', así que aquí también hay que usar esa vista
+  // en vez de la tabla completa para poder listar a todo el equipo.
+  const empleados = has?.('empleados','ver') ? db.empleados : (db.empleadosPublico||[]);
+
+  const activos = empleados.filter(e=>e.estado==='ACTIVO');
   const propiedad = db.propiedades.find(p=>p.id===prop);
-  const empleado  = db.empleados.find(e=>e.id===emp);
+  const empleado  = empleados.find(e=>e.id===emp);
 
   // ── Ubicación del dispositivo ──
   const pedirGeo = () => {
@@ -140,7 +145,7 @@ export default function Marcacion({db, set, toast, perfil}){
   return <Page title="Marcación" sub="Registro de asistencia con validación de ubicación"
     actions={<Btn v="outline" icon="download" onClick={()=>exportCSV('marcaciones_validadas',
       db.asistencia.filter(r=>r.validacion).map(r=>({
-        fecha:r.fecha, empleado:db.empleados.find(e=>e.id===r.empleado)?.nombre,
+        fecha:r.fecha, empleado:empleados.find(e=>e.id===r.empleado)?.nombre,
         propiedad:db.propiedades.find(p=>p.id===r.propiedad)?.nombre||'',
         hora:r.entrada, metodo:r.metodo, validacion:VALIDACION[r.validacion]?.label,
         latitud:r.lat??'', longitud:r.lng??'', ip:r.ip??'' })))}>Exportar</Btn>}>
@@ -267,7 +272,7 @@ export default function Marcacion({db, set, toast, perfil}){
         ? <Empty icon="check" title="Sin inconsistencias" sub="Todas las marcaciones registradas superaron la validación de ubicación."/>
         : <Table head={['Fecha','Empleado','Propiedad','Hora','Método','Resultado','Ubicación','IP']}>
           {inconsistentes.map(r => {
-            const e = db.empleados.find(x=>x.id===r.empleado);
+            const e = empleados.find(x=>x.id===r.empleado);
             const p = db.propiedades.find(x=>x.id===r.propiedad);
             const d = p && r.lat ? distanciaMt(r.lat,r.lng,p.lat,p.lng) : null;
             return <tr key={r.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">

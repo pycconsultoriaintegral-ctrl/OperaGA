@@ -4,10 +4,17 @@ import { ESTADO_ESTADIA } from '../lib/constants.js';
 import { uid, hoy, addDias, diffDias, fmtNum, fmtFecha, nombreDia } from '../lib/utils.js';
 import { evaluarEstadia } from '../lib/payroll.js';
 
-export default function EnReserva({db, set, toast}){
+export default function EnReserva({db, set, toast, has}){
   const [sel,setSel] = useState(null);
   const [edit,setEdit] = useState(null);
   const [tab,setTab] = useState('activas');
+
+  // Ver 'Alcance de acceso' en Empleados.jsx: Supervisor solo tiene permiso
+  // sobre 'empleados_publico', así que aquí también hay que usar esa vista
+  // en vez de la tabla completa — si no, el selector de "Mayordomo" al crear
+  // una estadía queda sin opciones ("No hay opciones") porque db.empleados
+  // le llega vacío por RLS.
+  const empleados = has?.('empleados','ver') ? db.empleados : (db.empleadosPublico||[]);
 
   const evalua = useMemo(() => {
     const m = {};
@@ -25,7 +32,7 @@ export default function EnReserva({db, set, toast}){
   const propsParaSeleccionar = idActual => (idActual && !propsActivas.some(p=>p.id===idActual))
     ? db.propiedades : propsActivas;
 
-  const vacio = { id:'', empleado:db.empleados.find(e=>e.interno)?.id||'', propiedad:propsActivas[0]?.id||'',
+  const vacio = { id:'', empleado:empleados.find(e=>e.interno)?.id||'', propiedad:propsActivas[0]?.id||'',
                   reserva:'', desde:hoy(), hasta:addDias(hoy(),5), estado:'PROGRAMADA', obs:'' };
 
   const guardar = () => {
@@ -36,7 +43,7 @@ export default function EnReserva({db, set, toast}){
 
   const generarCompensatorio = est => {
     const ev = evalua[est.id];
-    const emp = db.empleados.find(e=>e.id===est.empleado);
+    const emp = empleados.find(e=>e.id===est.empleado);
     set(d=>({...d, novedades:[{ id:uid(), empleado:est.empleado, tipo:'COMPENSATORIO',
       desde: addDias(est.hasta,1), hasta: addDias(est.hasta, Math.max(1,Math.round(ev.compensatorio))),
       dias: Math.max(1,Math.round(ev.compensatorio)),
@@ -56,7 +63,7 @@ export default function EnReserva({db, set, toast}){
         const filas = [];
         db.estadias.forEach(e => { const ev = evalua[e.id];
           ev.dias.forEach(d => filas.push({
-            estadia:e.id, empleado:db.empleados.find(x=>x.id===e.empleado)?.nombre,
+            estadia:e.id, empleado:empleados.find(x=>x.id===e.empleado)?.nombre,
             propiedad:db.propiedades.find(p=>p.id===e.propiedad)?.nombre, fecha:d.fecha,
             trabajo_efectivo:fmtNum(d.efectivo), descanso:fmtNum(d.descansoComputable),
             disponibilidad:fmtNum(d.disp), sin_clasificar:fmtNum(d.sinClasificar),
@@ -98,7 +105,7 @@ export default function EnReserva({db, set, toast}){
     : <div className="grid lg:grid-cols-2 gap-4">
       {lista.map(est => {
         const ev = evalua[est.id];
-        const emp = db.empleados.find(e=>e.id===est.empleado);
+        const emp = empleados.find(e=>e.id===est.empleado);
         const prop = db.propiedades.find(p=>p.id===est.propiedad);
         const pct = (ev.diasConformes/ev.total)*100;
         return <Card key={est.id} className={ev.criticos>0?'ring-2 ring-rose-500/30':''}>
@@ -153,7 +160,7 @@ export default function EnReserva({db, set, toast}){
     {/* ═══ Detalle diario ═══ */}
     <Modal open={!!sel} onClose={()=>setSel(null)} w="max-w-4xl"
       title="Control diario de la estadía"
-      sub={sel && `${db.empleados.find(e=>e.id===sel.empleado)?.nombre} · ${db.propiedades.find(p=>p.id===sel.propiedad)?.nombre}`}>
+      sub={sel && `${empleados.find(e=>e.id===sel.empleado)?.nombre} · ${db.propiedades.find(p=>p.id===sel.propiedad)?.nombre}`}>
       {sel && (()=>{ const ev = evalua[sel.id]; return <div className="space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[['Días de estadía',ev.total],['Días conformes',`${ev.diasConformes}/${ev.total}`],
@@ -222,7 +229,7 @@ export default function EnReserva({db, set, toast}){
         return <div className="grid sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2"><Field label="Mayordomo" req>
           <Select value={edit.empleado} onChange={e=>u('empleado',e.target.value)}
-            options={db.empleados.filter(e=>e.estado==='ACTIVO').map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}${e.interno?' (interno)':''}`}))}/></Field></div>
+            options={empleados.filter(e=>e.estado==='ACTIVO').map(e=>({v:e.id,l:`${e.nombre} — ${e.cargo}${e.interno?' (interno)':''}`}))}/></Field></div>
         <div className="sm:col-span-2"><Field label="Propiedad" req>
           <Select value={edit.propiedad} onChange={e=>u('propiedad',e.target.value)}
             options={propsParaSeleccionar(edit.propiedad).map(p=>({v:p.id,l:p.nombre}))}/></Field></div>
