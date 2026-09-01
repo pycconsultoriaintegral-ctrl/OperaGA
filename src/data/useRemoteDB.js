@@ -157,9 +157,21 @@ export function useRemoteDB(toast){
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
+  // Cada set() local incrementa esto. El refresco automático por Realtime
+  // (recargar) tarda un rato en ir y volver a Supabase — si mientras tanto
+  // el usuario edita otra fila (ej. pasa al siguiente empleado en Horarios),
+  // ese recargar() llegaba con una foto vieja y pisaba el cambio recién
+  // hecho apenas un instante después de que el usuario lo viera reflejado.
+  // Comparando la generación antes/después del fetch, un recargar() que
+  // quedó desactualizado por una edición local no se aplica — el propio
+  // guardado de esa edición dispara su propio recargar() más adelante.
+  const genRef = useRef(0);
+
   const recargar = useCallback(async () => {
+    const startGen = genRef.current;
     try {
       const fresh = await fetchAll();
+      if (genRef.current !== startGen) return; // hubo una edición local durante el fetch: descartar esta foto vieja
       dbRef.current = fresh;
       setDbState(fresh);
     } catch (err) {
@@ -199,6 +211,7 @@ export function useRemoteDB(toast){
       if (!base) return prev;
       const next = typeof fn === 'function' ? fn(base) : fn;
       dbRef.current = next;
+      genRef.current++;
       syncQueueRef.current = syncQueueRef.current.then(() => syncChanges(base, next)).catch(err => {
         console.error(err);
         toastRef.current?.('No se pudo guardar en la base de datos: ' + err.message, 'rose');
