@@ -158,14 +158,22 @@ export default function Marcacion({db, set, toast, perfil, has}){
       tipo, entrada:hm, salida:hm, metodo,
       obs:'Marcación desde kiosco', lat:geo?.lat??null, lng:geo?.lng??null, ip,
       validacion: validacion?.estado || 'MANUAL', foto };
-    // Si el guardado en Supabase falla (sin señal en la propiedad, datos
-    // caídos, token vencido), en vez de perderse en silencio la entrada queda
-    // en una cola local del teléfono y se reintenta sola al reconectar.
-    const alFallar = () => {
+    // Si el guardado en Supabase falla, en vez de perderse en silencio la
+    // entrada queda en una cola local del teléfono y se reintenta sola. Pero
+    // hay que distinguir la causa: si NO es falta de conexión (RLS, columna,
+    // token, permiso…) se muestra el mensaje real, porque reintentar no lo va
+    // a arreglar solo y necesitamos verlo para corregirlo.
+    const alFallar = (err) => {
       if(abierta) return;   // la salida se vuelve a intentar con el próximo escaneo
       agregarPendiente(nueva);
       setPendientes(leerPendientes());
-      toast('Sin conexión: la marcación quedó guardada en este teléfono y se enviará al reconectar.','amber');
+      const sinRed = !navigator.onLine || /fetch|network|Failed to fetch|timeout|conexi/i.test(err?.message || '');
+      if(sinRed){
+        toast('Sin conexión: la marcación quedó guardada en este teléfono y se enviará al reconectar.','amber');
+      } else {
+        const detalle = [err?.message, err?.details, err?.hint].filter(Boolean).join(' · ') || 'error desconocido';
+        toast('No se pudo registrar: ' + detalle + ' (quedó guardada para reintentar)','rose');
+      }
     };
     set(d => ({ ...d,
       asistencia: abierta
