@@ -3,6 +3,7 @@ import { Page, Card, Tabs, Field, Select, Input, Btn, Modal, Table, Td, Badge, A
 import { TIPOS_TIEMPO, METODOS, VALIDACION } from '../lib/constants.js';
 import { uid, pad, fmtFecha, hoy } from '../lib/utils.js';
 import { validarMarcacion, distanciaMt } from '../lib/geo.js';
+import { leerPendientes, agregarPendiente, depurarPendientes } from '../lib/marcacionesPendientes.js';
 
 export default function Marcacion({db, set, toast, perfil, has}){
   const propio = perfil?.empleado_id || perfil?.empleadoId || '';
@@ -17,7 +18,8 @@ export default function Marcacion({db, set, toast, perfil, has}){
   const [foto,setFoto] = useState(null);
   const [camara,setCamara] = useState(false);
   const [qrProp,setQrProp] = useState(null);
-  const videoRef = useRef(null), canvasRef = useRef(null), qrRef = useRef(null);
+  const videoRef = useRef(null), canvasRef = useRef(null), qrRef = useRef(null), fileRef = useRef(null);
+  const [pendientes,setPendientes] = useState(() => leerPendientes());
 
   // Ver 'Alcance de acceso' en Empleados.jsx: Supervisor solo tiene permiso
   // sobre 'empleados_publico', así que aquí también hay que usar esa vista
@@ -29,18 +31,25 @@ export default function Marcacion({db, set, toast, perfil, has}){
   const empleado  = empleados.find(e=>e.id===emp);
 
   // ── Ubicación del dispositivo ──
+  // Dos intentos: primero GPS de alta precisión con ventana corta; si no
+  // engancha (habitual bajo techo o en teléfonos de gama baja), se reintenta
+  // sin alta precisión, con más tiempo y aceptando una lectura de red reciente
+  // en vez de fallar del todo. La imprecisión ya no bloquea la marcación
+  // (ver validarMarcacion en lib/geo.js): a lo sumo la deja para revisión.
   const pedirGeo = () => {
     if(!navigator.geolocation){ setGeo({error:'Este navegador no soporta geolocalización.'}); return; }
     setCargandoGeo(true);
-    navigator.geolocation.getCurrentPosition(
-      p => { setCargandoGeo(false);
-             setGeo({ lat:+p.coords.latitude.toFixed(6), lng:+p.coords.longitude.toFixed(6),
-                      precision:Math.round(p.coords.accuracy) }); },
-      e => { setCargandoGeo(false);
-             setGeo({ error: e.code===1 ? 'Permiso de ubicación denegado por el usuario.'
-                          : e.code===2 ? 'Ubicación no disponible en este momento.'
-                          : 'Tiempo de espera agotado al obtener la ubicación.' }); },
-      { enableHighAccuracy:true, timeout:12000, maximumAge:0 });
+    const ok = p => { setCargandoGeo(false);
+      setGeo({ lat:+p.coords.latitude.toFixed(6), lng:+p.coords.longitude.toFixed(6),
+               precision:Math.round(p.coords.accuracy) }); };
+    const falla = e => { setCargandoGeo(false);
+      setGeo({ error: e.code===1 ? 'Permiso de ubicación denegado por el usuario.'
+                    : e.code===2 ? 'Ubicación no disponible en este momento.'
+                    : 'Tiempo de espera agotado al obtener la ubicación.' }); };
+    navigator.geolocation.getCurrentPosition(ok,
+      () => navigator.geolocation.getCurrentPosition(ok, falla,
+        { enableHighAccuracy:false, timeout:20000, maximumAge:60000 }),
+      { enableHighAccuracy:true, timeout:8000, maximumAge:0 });
   };
 
   // ── IP pública (solo corroborante; en producción se captura en el servidor) ──
@@ -71,12 +80,36 @@ export default function Marcacion({db, set, toast, perfil, has}){
   }, [db.propiedades]);
 
   // ── Cámara ──
+  // Si `getUserMedia` no existe o lo niegan (frecuente en el navegador interno
+  // de WhatsApp/Instagram, o en iOS fuera de Safari), se cae al selector de
+  // archivos nativo con `capture`, que abre la cámara del sistema igual.
   const abrirCamara = async () => {
+    if(!navigator.mediaDevices?.getUserMedia){ fileRef.current?.click(); return; }
     try{
       const st = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user' } });
       setCamara(true);
       setTimeout(()=>{ if(videoRef.current){ videoRef.current.srcObject = st; videoRef.current.play(); } },80);
-    }catch(e){ toast('No se pudo acceder a la cámara','rose'); }
+    }catch(e){ fileRef.current?.click(); }
+  };
+  // Foto tomada con el selector nativo: se reescala a 640 px de ancho y se
+  // recomprime para no mandar 3–4 MB de base64 a Supabase desde el celular.
+  const onArchivoFoto = e => {
+    const f = e.target.files?.[0]; e.target.value = '';
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        const escala = Math.min(1, 640 / (img.width || 640));
+        c.width = Math.round((img.width || 640) * escala);
+        c.height = Math.round((img.height || 480) * escala);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        setFoto(c.toDataURL('image/jpeg', 0.6));
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(f);
   };
   const capturar = () => {
     const v = videoRef.current, c = canvasRef.current;
@@ -101,7 +134,7 @@ export default function Marcacion({db, set, toast, perfil, has}){
   const validacion = useMemo(() => {
     if(!propiedad) return null;
     return validarMarcacion(
-      { lat:geo?.lat, lng:geo?.lng, codigo, ip, foto }, propiedad, db.cfg);
+      { lat:geo?.lat, lng:geo?.lng, precision:geo?.precision, codigo, ip, foto }, propiedad, db.cfg);
   }, [propiedad, geo, codigo, ip, foto, db.cfg]);
 
   // Si ya existe una marcación de hoy para este empleado/propiedad/tipo sin
@@ -121,21 +154,67 @@ export default function Marcacion({db, set, toast, perfil, has}){
     const ahora = new Date();
     const hm = `${pad(ahora.getHours())}:${pad(ahora.getMinutes())}`;
     const metodo = geo?.lat ? 'GPS' : (codigo ? 'QR' : 'MANUAL');
+    const nueva = { id:uid(), empleado:emp, propiedad:prop, fecha:hoy(),
+      tipo, entrada:hm, salida:hm, metodo,
+      obs:'Marcación desde kiosco', lat:geo?.lat??null, lng:geo?.lng??null, ip,
+      validacion: validacion?.estado || 'MANUAL', foto };
+    // Si el guardado en Supabase falla (sin señal en la propiedad, datos
+    // caídos, token vencido), en vez de perderse en silencio la entrada queda
+    // en una cola local del teléfono y se reintenta sola al reconectar.
+    const alFallar = () => {
+      if(abierta) return;   // la salida se vuelve a intentar con el próximo escaneo
+      agregarPendiente(nueva);
+      setPendientes(leerPendientes());
+      toast('Sin conexión: la marcación quedó guardada en este teléfono y se enviará al reconectar.','amber');
+    };
     set(d => ({ ...d,
       asistencia: abierta
         ? d.asistencia.map(r => r.id===abierta.id ? { ...r, salida:hm, metodo, foto: foto||r.foto } : r)
-        : [...d.asistencia, { id:uid(), empleado:emp, propiedad:prop, fecha:hoy(),
-            tipo, entrada:hm, salida:hm, metodo,
-            obs:'Marcación desde kiosco', lat:geo?.lat??null, lng:geo?.lng??null, ip,
-            validacion: validacion?.estado || 'MANUAL', foto }],
+        : [...d.asistencia, nueva],
       auditoria: [{ id:uid(), fecha:new Date().toISOString().slice(0,16).replace('T',' '),
         usuario: empleado?.nombre || '—', accion: abierta?'MARCAR_SALIDA':'MARCAR_ENTRADA',
         entidad:`Asistencia ${propiedad?.nombre}`,
         detalle:`${TIPOS_TIEMPO[tipo].label} · ${abierta?'Salida':'Entrada'} ${hm} · ${VALIDACION[validacion?.estado||'MANUAL'].label}` }, ...d.auditoria]
-    }));
+    }), alFallar);
     toast((abierta?'Salida registrada · ':'Entrada registrada · ') + hm);
     setFoto(null); setCodigo('');
   };
+
+  // ── Reintento de la cola local de marcaciones ──
+  // Descarta de la cola lo que ya se sincronizó (mismo id ya en db.asistencia)
+  // y reintenta el resto. Se dispara al montar, cada vez que llega asistencia
+  // nueva desde la base, y al recuperar conexión (`online`) — este último caso
+  // reinicia el contador de intentos para volver a probar en firme. Tras 5
+  // intentos seguidos sin `online` de por medio, deja de insistir y avisa una
+  // sola vez, pero la marca no se borra: sigue en el teléfono.
+  useEffect(() => {
+    const sincronizar = ({ reintentar = false } = {}) => {
+      let vivos = depurarPendientes(db.asistencia);
+      if(reintentar){
+        vivos = vivos.map(r => ({ ...r, _intentos:0, _avisado:false }));
+        vivos.forEach(agregarPendiente);
+      }
+      setPendientes(vivos);
+      if(!navigator.onLine) return;
+      vivos.forEach(row => {
+        if((row._intentos||0) >= 5){
+          if(!row._avisado){ agregarPendiente({ ...row, _avisado:true });
+            toast('Una marcación no se pudo enviar tras varios intentos. Avisa a administración.','rose'); }
+          return;
+        }
+        const { _intentos, _ts, _avisado, ...limpia } = row;
+        agregarPendiente({ ...limpia, _intentos:(row._intentos||0)+1 });
+        set(d => d.asistencia.some(r => r.id===limpia.id) ? d
+              : ({ ...d, asistencia:[...d.asistencia, limpia] }),
+          // si el reintento también falla, se vuelve a dejar en la cola
+          () => { agregarPendiente({ ...limpia, _intentos:(row._intentos||0)+1 }); setPendientes(leerPendientes()); });
+      });
+    };
+    const alReconectar = () => sincronizar({ reintentar:true });
+    sincronizar();
+    window.addEventListener('online', alReconectar);
+    return () => window.removeEventListener('online', alReconectar);
+  }, [db.asistencia]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Marcaciones con inconsistencia ──
   const inconsistentes = db.asistencia
@@ -193,7 +272,7 @@ export default function Marcacion({db, set, toast, perfil, has}){
               <span className="text-xs font-bold">{cargandoGeo?'Obteniendo ubicación…':'Ubicación GPS'}</span></div>
             <p className="text-[11px] opacity-80">
               {geo?.lat ? `${geo.lat}, ${geo.lng} · ±${geo.precision} m`
-                : geo?.error ? geo.error : 'Toca para obtener la ubicación del dispositivo'}</p>
+                : geo?.error ? `${geo.error} Toca para reintentar.` : 'Toca para obtener la ubicación del dispositivo'}</p>
           </button>
 
           <button onClick={foto ? ()=>setFoto(null) : abrirCamara}
@@ -203,6 +282,7 @@ export default function Marcacion({db, set, toast, perfil, has}){
               <span className="text-xs font-bold">Fotografía {db.cfg.exigirFoto?'(requerida)':'(opcional)'}</span></div>
             <p className="text-[11px] opacity-80">{foto?'Capturada — toca para descartar':'Toca para tomar una foto de respaldo'}</p>
           </button>
+          <input ref={fileRef} type="file" accept="image/*" capture="user" className="hidden" onChange={onArchivoFoto}/>
         </div>
 
         {camara && <div className="mt-4 p-3 rounded-xl bg-ink-900">
@@ -223,6 +303,8 @@ export default function Marcacion({db, set, toast, perfil, has}){
             ? <>Ya hay una entrada abierta hoy a las <b className="text-ink-800 dark:text-ink-100">{abierta.entrada}</b> — este botón registra la <b>salida</b>.</>
             : <>Este botón registra la <b>entrada</b>. Vuelve a escanear el QR al terminar el turno para registrar la salida.</>}
         </p>}
+        {pendientes.length>0 && <p className="mt-3 text-center text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+          {pendientes.length} marcación{pendientes.length>1?'es':''} guardada{pendientes.length>1?'s':''} en este teléfono, sin enviar todavía. Se reintenta al recuperar señal.</p>}
         <div className="mt-2"><Btn s="lg" className="w-full" icon="check" onClick={registrar}
           disabled={!emp||!prop||validacion?.bloqueante}>{abierta?'Registrar salida':'Registrar entrada'}</Btn></div>
       </Card>

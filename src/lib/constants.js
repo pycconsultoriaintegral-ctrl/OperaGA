@@ -96,12 +96,13 @@ export const METODOS = {
 
 // Resultado de validación de una marcación
 export const VALIDACION = {
-  OK:          { label:'Validada',              color:'emerald' },
-  FUERA_ZONA:  { label:'Fuera de la propiedad', color:'rose'    },
-  SIN_GPS:     { label:'Sin ubicación',         color:'amber'   },
-  IP_DISTINTA: { label:'Red no reconocida',     color:'amber'   },
-  CODIGO_MAL:  { label:'Código incorrecto',     color:'rose'    },
-  MANUAL:      { label:'Registro manual',       color:'slate'   }
+  OK:           { label:'Validada',              color:'emerald' },
+  FUERA_ZONA:   { label:'Fuera de la propiedad', color:'rose'    },
+  SIN_GPS:      { label:'Sin ubicación',         color:'amber'   },
+  GPS_IMPRECISO:{ label:'Ubicación imprecisa',   color:'amber'   },
+  IP_DISTINTA:  { label:'Red no reconocida',     color:'amber'   },
+  CODIGO_MAL:   { label:'Código incorrecto',     color:'rose'    },
+  MANUAL:       { label:'Registro manual',       color:'slate'   }
 };
 
 export const ESTADO_ESTADIA = {

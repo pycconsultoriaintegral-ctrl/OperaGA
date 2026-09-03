@@ -241,7 +241,11 @@ export function useRemoteDB(toast, userId){
   // preservando el orden real en que se aplicaron los cambios de estado.
   const syncQueueRef = useRef(Promise.resolve());
 
-  const set = useCallback((fn) => {
+  // `onError(err)` opcional: si el guardado en Supabase falla, en vez del toast
+  // genérico se llama a este callback (lo usa Marcación para dejar la marca en
+  // una cola local del teléfono y reintentarla al reconectar). En ambos casos
+  // se recarga para revertir el cambio optimista que no se pudo persistir.
+  const set = useCallback((fn, onError) => {
     setDbState(prev => {
       const base = prev || dbRef.current;
       if (!base) return prev;
@@ -250,7 +254,8 @@ export function useRemoteDB(toast, userId){
       genRef.current++;
       syncQueueRef.current = syncQueueRef.current.then(() => syncChanges(base, next)).catch(err => {
         console.error(err);
-        toastRef.current?.('No se pudo guardar en la base de datos: ' + err.message, 'rose');
+        if (onError) onError(err);
+        else toastRef.current?.('No se pudo guardar en la base de datos: ' + err.message, 'rose');
         recargar(); // revierte cualquier cambio optimista que no se haya podido guardar
       });
       return next;
