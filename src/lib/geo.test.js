@@ -52,4 +52,28 @@ describe('validarMarcacion', () => {
     const r = validarMarcacion({ lat:null, lng:null, codigo:'', ip:null, foto:null }, null, cfg);
     expect(r.estado).toBe('MANUAL');
   });
+
+  it('NO bloquea si la distancia entra en el radio al descontar el margen de error del GPS', () => {
+    // ~122 m del punto exacto, pero el GPS reporta ±100 m: 122 - 100 <= 150
+    const r = validarMarcacion(
+      { lat:10.47230, lng:-75.4890, precision:100, codigo:'VMB-01', ip:null, foto:null }, propiedad, cfg);
+    expect(r.bloqueante).toBe(false);
+    expect(r.estado).toBe('OK');
+  });
+
+  it('marca GPS_IMPRECISO (sin bloquear) cuando el margen de error supera el radio', () => {
+    const r = validarMarcacion(
+      { lat:10.60, lng:-75.60, precision:20000, codigo:'VMB-01', ip:null, foto:null }, propiedad, cfg);
+    expect(r.estado).toBe('GPS_IMPRECISO');
+    expect(r.bloqueante).toBe(false);
+    expect(r.distancia).toBeGreaterThan(cfg.radioGeocerca);
+  });
+
+  it('sigue bloqueando cuando hay una lectura precisa que cae fuera del radio', () => {
+    // ~300 m de distancia con ±30 m de precisión: 300 - 30 > 150
+    const r = validarMarcacion(
+      { lat:10.47390, lng:-75.4890, precision:30, codigo:'VMB-01', ip:null, foto:null }, propiedad, cfg);
+    expect(r.estado).toBe('FUERA_ZONA');
+    expect(r.bloqueante).toBe(true);
+  });
 });

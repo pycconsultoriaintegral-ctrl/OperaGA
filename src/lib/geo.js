@@ -16,7 +16,7 @@ export function distanciaMt(lat1, lon1, lat2, lon2){
  * La IP es un dato CORROBORANTE, nunca bloqueante: en producción debe capturarse
  * en el servidor, porque la IP reportada por el cliente es falsificable.
  */
-export function validarMarcacion({lat, lng, codigo, ip, foto}, propiedad, cfg){
+export function validarMarcacion({lat, lng, precision, codigo, ip, foto}, propiedad, cfg){
   const r = { estado:'OK', distancia:null, avisos:[], bloqueante:false };
   if(!propiedad){ r.estado='MANUAL'; return r; }
 
@@ -32,9 +32,31 @@ export function validarMarcacion({lat, lng, codigo, ip, foto}, propiedad, cfg){
   // 2. Geocerca (control primario)
   if(lat!=null && lng!=null && propiedad.lat!=null){
     r.distancia = distanciaMt(lat, lng, propiedad.lat, propiedad.lng);
-    if(r.distancia > cfg.radioGeocerca){
-      r.estado='FUERA_ZONA'; r.bloqueante=true;
-      r.avisos.push(`Marcación a ${r.distancia} m de ${propiedad.nombre} (radio permitido: ${cfg.radioGeocerca} m).`);
+    // El navegador reporta el margen de error de la lectura en `precision`
+    // (metros). En un celular bajo techo o de gama baja ese margen llega a
+    // cientos o miles de metros y la posición "exacta" no sirve para un radio
+    // de ~150 m: antes esto bloqueaba a trabajadores que SÍ estaban en el sitio
+    // y no podían marcar desde su teléfono. Ahora:
+    //   · si la distancia, descontado el margen de error, cabe en el radio → OK
+    //   · si el margen de error supera al propio radio, la lectura no permite
+    //     decidir → se registra para revisión, nunca se bloquea
+    //   · solo se bloquea cuando hay una lectura razonablemente precisa que
+    //     de verdad cae fuera del radio
+    const margen = Number.isFinite(precision) ? Math.max(0, precision) : 0;
+    if(margen > cfg.radioGeocerca){
+      // La lectura es demasiado imprecisa para juzgar la geocerca. Si aun así
+      // la distancia estimada cae dentro del radio se deja pasar como OK; si
+      // cae fuera, no se bloquea: se registra y queda para revisión.
+      if(r.distancia > cfg.radioGeocerca){
+        r.estado = 'GPS_IMPRECISO';
+        r.avisos.push(`Ubicación con precisión de ±${margen} m: no permite confirmar la geocerca `
+          + `(distancia estimada ${r.distancia} m de ${propiedad.nombre}). Se registra y queda marcada para revisión.`);
+      }
+    } else if(r.distancia - margen > cfg.radioGeocerca){
+      // Lectura razonablemente precisa que de verdad cae fuera del radio.
+      r.estado = 'FUERA_ZONA'; r.bloqueante = true;
+      r.avisos.push(`Marcación a ${r.distancia} m de ${propiedad.nombre} `
+        + `(±${margen} m de precisión · radio permitido: ${cfg.radioGeocerca} m).`);
     }
   } else if(cfg.exigirGPS){
     r.estado='SIN_GPS';
