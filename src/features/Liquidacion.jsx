@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Stat, Icon, Tabs, exportCSV } from '../components/ui.jsx';
-import { liquidar, valorizar, prestaciones, aportes } from '../lib/payroll.js';
+import { liquidar, valorizar, prestaciones, aportes, imputarEstadias } from '../lib/payroll.js';
 import { TIPOS_NOVEDAD } from '../lib/constants.js';
 import { fmtCOP, fmtNum, fmtFecha, hoy, pad, diffDias } from '../lib/utils.js';
 
@@ -36,10 +36,23 @@ export default function Liquidacion({db, toast}){
 
   // ── Liquidación completa (personal operativo, por horas + recargos) ──
   const calc = useMemo(() => operativos.map(e => {
-    const regs = db.asistencia.filter(r=>r.empleado===e.id && r.fecha>=desde && r.fecha<=hasta);
+    const reales = db.asistencia.filter(r=>r.empleado===e.id && r.fecha>=desde && r.fecha<=hasta);
+    // Días de estadía en la propiedad (por una reserva) sin marcación: se
+    // imputa la jornada ordinaria para que ese tiempo sí entre a la nómina.
+    // Ver imputarEstadias en lib/payroll.js — lo marcado siempre manda.
+    const imp = imputarEstadias(db.estadias||[], db.asistencia, e.id, desde, hasta, db.cfg, hoy());
+    const regs = [...reales, ...imp.registros];
     const res = liquidar(regs, db.cfg, db.festivos);
     const val = valorizar(res, e.salario, db.cfg);
     const dias = Object.keys(res.detalle).length;
+    // Trazabilidad: de qué estadía y de qué reserva salió cada día imputado.
+    const cobertura = Object.keys(imp.porEstadia).map(id => {
+      const es = (db.estadias||[]).find(x=>x.id===id);
+      const rv = db.reservas.find(x=>x.id===es?.reserva);
+      return { dias: imp.porEstadia[id].length,
+        propiedad: db.propiedades.find(p=>p.id===es?.propiedad)?.nombre || '—',
+        huesped: rv?.huesped || null, desde: es?.desde, hasta: es?.hasta };
+    });
     const prest = prestaciones(val.total, dias, db.cfg);
     const ap = aportes(val.total);
     const auxT = e.salario <= db.cfg.salarioMinimo*db.cfg.topeAuxTransporte
@@ -47,8 +60,11 @@ export default function Liquidacion({db, toast}){
     const devengado = val.total + auxT;
     const deducciones = ap.empleado.salud + ap.empleado.pension;
     return { emp:e, res, val, dias, prest, ap, auxT, devengado, deducciones, neto: devengado-deducciones,
+      imputados: imp.dias.length, cobertura,
       costoEmpresa: devengado + Object.values(ap.empleador).reduce((a,b)=>a+b,0) + Object.values(prest).reduce((a,b)=>a+b,0) };
-  }), [operativos, db.asistencia, db.cfg, db.festivos, desde, hasta]);
+  }), [operativos, db.asistencia, db.estadias, db.reservas, db.propiedades, db.cfg, db.festivos, desde, hasta]);
+
+  const totImputados = calc.reduce((s,c)=>s+c.imputados, 0);
 
   const tot = calc.reduce((a,c)=>({
     horas:a.horas+c.res.totalEfectivo, disp:a.disp+c.res.disponibilidadHrs,
@@ -89,6 +105,8 @@ export default function Liquidacion({db, toast}){
     } else {
       exportCSV('liquidacion', calc.map(c=>({
         empleado:c.emp.nombre, cargo:c.emp.cargo, dias:c.dias,
+        dias_imputados_por_estadia:c.imputados,
+        reservas_cubiertas:c.cobertura.map(x=>`${x.huesped||'sin huésped'} (${x.propiedad}, ${x.dias}d)`).join(' | '),
         horas_efectivas:fmtNum(c.res.totalEfectivo), horas_disponibilidad:fmtNum(c.res.disponibilidadHrs),
         salario_base:c.emp.salario, valor_horas:Math.round(c.val.subtotal),
         valor_disponibilidad:Math.round(c.val.disponibilidad.total), aux_transporte:Math.round(c.auxT),
@@ -158,6 +176,17 @@ export default function Liquidacion({db, toast}){
           </Table>}
       </Card>
     </> : <>
+      {totImputados>0 && <div className="mb-4 p-3.5 rounded-xl bg-violet-50 dark:bg-violet-500/10 ring-1 ring-inset ring-violet-500/20 flex gap-3">
+        <Icon n="bed" c="w-5 h-5 text-violet-600 dark:text-violet-400 shrink-0 mt-0.5"/>
+        <div className="text-xs text-violet-900 dark:text-violet-200 leading-relaxed">
+          <b>{totImputados} día(s) imputados por estadía en propiedad.</b> Son días en que el trabajador
+          estaba alojado en una propiedad por una reserva y <b>no quedó marcación</b>. Se les imputa la
+          jornada ordinaria de {db.cfg.horasDiarias} h diurnas (08:00–{pad(8+db.cfg.horasDiarias)}:00) para que
+          ese tiempo sí entre a la nómina. Lo que el trabajador sí marcó siempre manda: un día con marcación
+          nunca se imputa, y no se inventan horas de disponibilidad. Ver la columna <b>Por reserva</b>.
+        </div>
+      </div>}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <Stat label="Horas efectivas" value={fmtNum(tot.horas,0)} icon="clock" tone="emerald" sub={`+ ${fmtNum(tot.disp,0)} h disponibilidad`}/>
         <Stat label="Total devengado" value={fmtCOP(tot.devengado)} icon="money" tone="brand" sub={`${calc.length} empleados`}/>
@@ -166,13 +195,19 @@ export default function Liquidacion({db, toast}){
       </div>
 
       <Card pad={false}>
-        <Table head={['Empleado','Días','H. efectivas','H. disponib.','Valor horas','Disponib.','Aux. transp.','Devengado','Deducc.','Neto','']}>
+        <Table head={['Empleado','Días','Por reserva','H. efectivas','H. disponib.','Valor horas','Disponib.','Aux. transp.','Devengado','Deducc.','Neto','']}>
           {calc.map(c => (
             <tr key={c.emp.id} className="hover:bg-ink-50 dark:hover:bg-ink-950/40">
               <Td><div className="flex items-center gap-2.5"><Avatar nombre={c.emp.nombre} size="w-8 h-8"/>
                 <div className="min-w-0"><p className="font-bold truncate">{c.emp.nombre.split(' ').slice(0,2).join(' ')}</p>
                   <p className="text-[11px] text-ink-400">{c.emp.cargo}</p></div></div></Td>
               <Td className="num">{c.dias}</Td>
+              <Td>{c.imputados>0
+                ? <><Badge tone="violet">{c.imputados} d</Badge>
+                    <p className="text-[10px] text-ink-400 mt-0.5 leading-tight">
+                      {c.cobertura.map(x=>x.huesped||x.propiedad).slice(0,2).join(', ')}
+                      {c.cobertura.length>2?` +${c.cobertura.length-2}`:''}</p></>
+                : <span className="text-ink-300">—</span>}</Td>
               <Td className="num font-semibold">{fmtNum(c.res.totalEfectivo)}</Td>
               <Td className="num text-amber-600 font-semibold">{fmtNum(c.res.disponibilidadHrs)}</Td>
               <Td className="num text-xs">{fmtCOP(c.val.subtotal)}</Td>
@@ -185,6 +220,7 @@ export default function Liquidacion({db, toast}){
             </tr>))}
           <tr className="bg-ink-50 dark:bg-ink-950/60 font-extrabold">
             <Td className="font-extrabold">TOTAL</Td><Td/>
+            <Td className="num">{totImputados>0?`${totImputados} d`:'—'}</Td>
             <Td className="num">{fmtNum(tot.horas)}</Td><Td className="num">{fmtNum(tot.disp)}</Td>
             <Td/><Td/><Td/>
             <Td className="num">{fmtCOP(tot.devengado)}</Td><Td/>

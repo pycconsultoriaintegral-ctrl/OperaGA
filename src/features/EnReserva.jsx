@@ -41,16 +41,41 @@ export default function EnReserva({db, set, toast, has}){
     setEdit(null); toast(n?'Estadía creada':'Estadía actualizada');
   };
 
-  const generarCompensatorio = est => {
+  // `soporte = est.id` es lo que enlaza la novedad con su estadía: por ahí se
+  // sabe después cuáles ya se otorgaron y cuáles siguen pendientes.
+  const novedadComp = est => {
     const ev = evalua[est.id];
-    const emp = empleados.find(e=>e.id===est.empleado);
-    set(d=>({...d, novedades:[{ id:uid(), empleado:est.empleado, tipo:'COMPENSATORIO',
-      desde: addDias(est.hasta,1), hasta: addDias(est.hasta, Math.max(1,Math.round(ev.compensatorio))),
-      dias: Math.max(1,Math.round(ev.compensatorio)),
+    const dias = Math.max(1, Math.round(ev.compensatorio));
+    return { id:uid(), empleado:est.empleado, tipo:'COMPENSATORIO',
+      desde: addDias(est.hasta,1), hasta: addDias(est.hasta, dias), dias,
       motivo:`Compensatorio por estadía de ${ev.total} días en ${db.propiedades.find(p=>p.id===est.propiedad)?.nombre}`,
-      soporte:est.id, estado:'PENDIENTE' }, ...d.novedades]}));
-    toast(`Compensatorio de ${Math.round(ev.compensatorio)} días generado para ${emp?.nombre.split(' ')[0]}`);
+      soporte:est.id, estado:'PENDIENTE' };
   };
+
+  const generarCompensatorio = est => {
+    const emp = empleados.find(e=>e.id===est.empleado);
+    const nv = novedadComp(est);
+    set(d=>({...d, novedades:[nv, ...d.novedades]}));
+    toast(`Compensatorio de ${nv.dias} días generado para ${emp?.nombre.split(' ')[0]}`);
+  };
+
+  // Aprobar varios va en un solo guardado, no uno por estadía.
+  const aprobarTodos = ests => {
+    const nvs = ests.map(novedadComp);
+    set(d=>({...d, novedades:[...nvs, ...d.novedades]}));
+    toast(`${nvs.length} compensatorios otorgados`);
+  };
+
+  // Compensatorios que el sistema propone y están esperando aprobación:
+  // estadías FINALIZADAS con saldo de compensatorio y sin la novedad creada.
+  // La novedad queda enlazada por `soporte = est.id` (ver generarCompensatorio).
+  const pendientesComp = useMemo(() => db.estadias
+    .filter(e => e.estado==='FINALIZADA')
+    .filter(e => Math.round(evalua[e.id]?.compensatorio || 0) > 0)
+    .filter(e => !db.novedades.some(n => n.tipo==='COMPENSATORIO' && n.soporte===e.id))
+    .map(e => ({ est:e, ev:evalua[e.id], emp:empleados.find(x=>x.id===e.empleado),
+                 prop:db.propiedades.find(p=>p.id===e.propiedad) })),
+    [db.estadias, db.novedades, db.propiedades, empleados, evalua]);
 
   // Totales de cabecera
   const activas = porEstado('ACTIVA');
@@ -94,6 +119,32 @@ export default function EnReserva({db, set, toast, has}){
       <Stat label="Compensatorios por otorgar" value={fmtNum(totComp,1)} icon="calendar" tone="violet"
         sub="De estadías finalizadas"/>
     </div>
+
+    {/* Compensatorios propuestos: el sistema los detecta solo, pero alguien
+        tiene que aprobarlos antes de que queden como novedad en la nómina. */}
+    {pendientesComp.length>0 && <Card className="mb-4 !p-4 bg-amber-50 dark:bg-amber-500/10 ring-amber-500/25">
+      <div className="flex flex-wrap items-start gap-3">
+        <Icon n="alert" c="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"/>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-extrabold text-amber-900 dark:text-amber-200">
+            {pendientesComp.length} compensatorio(s) por aprobar</p>
+          <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
+            Estadías ya finalizadas que generaron descanso compensatorio y todavía no se han otorgado.</p>
+          <div className="mt-2.5 space-y-1.5">
+            {pendientesComp.map(({est,ev,emp,prop}) => (
+              <div key={est.id} className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold text-amber-900 dark:text-amber-200">{emp?.nombre||'—'}</span>
+                <span className="text-amber-700 dark:text-amber-400">
+                  {prop?.nombre} · {ev.total} días · {fmtFecha(est.desde)} → {fmtFecha(est.hasta)}</span>
+                <Badge tone="amber">{Math.round(ev.compensatorio)} día(s)</Badge>
+                <Btn s="sm" v="soft" icon="check" onClick={()=>generarCompensatorio(est)}>Aprobar</Btn>
+              </div>))}
+          </div>
+        </div>
+        {pendientesComp.length>1 && <Btn s="sm" icon="check"
+          onClick={()=>aprobarTodos(pendientesComp.map(p=>p.est))}>Aprobar todos</Btn>}
+      </div>
+    </Card>}
 
     <div className="mb-5"><Tabs active={tab} onChange={setTab} tabs={[
       {id:'activas',label:'Activas',count:porEstado('ACTIVA').length},

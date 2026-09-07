@@ -39,10 +39,41 @@ export default function Propiedades({db, set, toast, refrescar, has}){
     set(d=>({...d, propiedades: n?[...d.propiedades,p]:d.propiedades.map(x=>x.id===p.id?p:x)}));
     setEdit(null); toast(n?'Propiedad creada':'Cambios guardados'); };
 
-  const guardarR = () => { if(!editR.huesped.trim()) return toast('El huésped es obligatorio','rose');
+  // Una reserva aloja al mayordomo de la propiedad durante esas noches. Al
+  // crearla se genera su estadía, con las mismas fechas y enlazada a la
+  // reserva: de ahí sale el tiempo que la liquidación imputa cuando no quedó
+  // marcación (ver imputarEstadias en lib/payroll.js). Sin estadía, una
+  // reserva no produce ningún efecto en la nómina.
+  const guardarR = () => {
+    if(!editR.huesped.trim()) return toast('El huésped es obligatorio','rose');
     const n=!editR.id, r=n?{...editR,id:uid()}:editR;
-    set(d=>({...d, reservas: n?[...d.reservas,r]:d.reservas.map(x=>x.id===r.id?r:x)}));
-    setEditR(null); toast(n?'Reserva creada':'Reserva actualizada'); };
+    const prop = db.propiedades.find(p=>p.id===r.propiedad);
+    const creaEstadia = n && r.estado!=='CANCELADA' && !!prop?.mayordomo;
+    set(d=>{
+      const reservas = n ? [...d.reservas,r] : d.reservas.map(x=>x.id===r.id?r:x);
+      let estadias = d.estadias;
+      if(creaEstadia){
+        estadias = [...d.estadias, { id:uid(), empleado:prop.mayordomo, propiedad:r.propiedad,
+          reserva:r.id, desde:r.desde, hasta:r.hasta,
+          estado:(r.desde<=HOY && r.hasta>=HOY) ? 'ACTIVA' : 'PROGRAMADA',
+          obs:`Generada automáticamente por la reserva de ${r.huesped}` }];
+      } else if(!n){
+        // Al editar la reserva se mueven las fechas de su estadía enlazada
+        // para que no queden descuadradas con las de la reserva.
+        estadias = d.estadias.map(e => e.reserva===r.id
+          ? { ...e, desde:r.desde, hasta:r.hasta, propiedad:r.propiedad } : e);
+      }
+      return {...d, reservas, estadias};
+    });
+    setEditR(null);
+    if(creaEstadia){
+      const may = empleados.find(e=>e.id===prop.mayordomo);
+      toast(`Reserva creada · estadía de ${may?.nombre.split(' ')[0] || 'el mayordomo'} generada`);
+    } else if(n && !prop?.mayordomo){
+      toast('Reserva creada. La propiedad no tiene mayordomo asignado, así que no se generó estadía '
+        + 'y esas noches no entrarán a la nómina.','amber');
+    } else toast(n?'Reserva creada':'Reserva actualizada');
+  };
 
   const mayordomos = empleados.filter(e=>e.cargo==='Mayordomo' && e.estado==='ACTIVO');
 
