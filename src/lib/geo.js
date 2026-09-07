@@ -63,11 +63,19 @@ export function validarMarcacion({lat, lng, precision, codigo, ip, foto}, propie
     r.avisos.push('No se obtuvo la ubicación del dispositivo. Se registra, pero queda marcada para revisión.');
   }
 
-  // 3. IP: solo corrobora, no bloquea
+  // 3. IP: SOLO informativa. No bloquea y tampoco cambia el estado.
+  //
+  // Antes ponía estado='IP_DISTINTA', y como el listado de inconsistencias
+  // muestra todo lo que no sea OK/MANUAL, cada marcación hecha desde el celular
+  // con datos móviles entraba ahí: la IP que ve el navegador es la del operador
+  // (CGNAT), nunca la del internet de la propiedad, así que NUNCA coincidía.
+  // El resultado era un listado de inconsistencias lleno de marcaciones
+  // perfectamente válidas. La IP queda como nota de contexto y nada más.
   if(ip && propiedad.ips && propiedad.ips.length && !propiedad.ips.includes(ip)){
-    if(r.estado==='OK') r.estado='IP_DISTINTA';
+    r.ipDistinta = true;
     r.avisos.push(`La IP ${ip} no está entre las registradas para la propiedad. `
-      + 'Puede deberse a IP dinámica, datos móviles o CGNAT del operador: verificar, no sancionar.');
+      + 'Es normal si marca con datos móviles (CGNAT del operador) o si el internet '
+      + 'de la propiedad tiene IP dinámica. Es solo un dato de contexto: no invalida la marcación.');
   }
 
   // 4. Foto

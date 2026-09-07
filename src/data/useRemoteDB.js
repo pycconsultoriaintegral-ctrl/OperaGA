@@ -79,9 +79,19 @@ async function fetchAll(){
   return db;
 }
 
+/** Error legible cuando la base acepta la sentencia pero RLS la deja en 0 filas. */
+function errorPermiso(tabla, accion, cuantas){
+  const e = new Error(`La base de datos no dejó ${accion} ${cuantas} registro(s) en "${tabla}": `
+    + `tu rol no tiene ese permiso. Pide a un administrador que lo habilite en Configuración → Roles.`);
+  e.code = 'SIN_PERMISO';
+  e.tabla = tabla;
+  return e;
+}
+
 /** Sincroniza una tabla insertando/actualizando/eliminando solo lo que cambió
- *  entre `prevRows` y `nextRows` (comparados por `id`). */
-async function syncTabla(key, prevRows, nextRows){
+ *  entre `prevRows` y `nextRows` (comparados por `id`). Exportada para poder
+ *  probar en test la detección de escrituras que RLS deja en 0 filas. */
+export async function syncTabla(key, prevRows, nextRows){
   const { table, toRow, onConflict } = TABLAS[key];
   const prevMap = new Map(prevRows.map(r => [r.id, r]));
   const nextMap = new Map(nextRows.map(r => [r.id, r]));
@@ -99,10 +109,23 @@ async function syncTabla(key, prevRows, nextRows){
   // una fila por otra para la misma llave natural (empleado_id, fecha) — si el
   // insert corre antes del delete, la fila vieja todavía existe y choca contra
   // la restricción unique. Con el delete primero nunca coexisten las dos.
-  if (deletes.length) { const { error } = await supabase.from(table).delete().in('id', deletes); if (error) throw error; }
-  for (const { id, ...rest } of updates) {
-    const { error } = await supabase.from(table).update(rest).eq('id', id);
+  //
+  // OJO con RLS: un DELETE o un UPDATE que la política no permite NO devuelve
+  // error — la fila simplemente es invisible para esa sentencia, afecta a 0
+  // filas y Postgres responde "éxito". Así, a un rol sin `eliminar` (p. ej.
+  // Supervisor sobre `horarios`) la app le decía que había guardado, la celda
+  // desaparecía de la pantalla y al recargar el turno volvía a aparecer.
+  // Por eso cada delete/update pide de vuelta los ids realmente afectados y
+  // se compara la cuenta: si faltan, se levanta un error explícito.
+  if (deletes.length) {
+    const { data, error } = await supabase.from(table).delete().in('id', deletes).select('id');
     if (error) throw error;
+    if ((data || []).length < deletes.length) throw errorPermiso(table, 'eliminar', deletes.length - (data || []).length);
+  }
+  for (const { id, ...rest } of updates) {
+    const { data, error } = await supabase.from(table).update(rest).eq('id', id).select('id');
+    if (error) throw error;
+    if (!(data || []).length) throw errorPermiso(table, 'modificar', 1);
   }
   if (inserts.length) {
     // Con onConflict (ej. horarios: empleado_id+fecha), dos sesiones creando
@@ -241,26 +264,58 @@ export function useRemoteDB(toast, userId){
   // preservando el orden real en que se aplicaron los cambios de estado.
   const syncQueueRef = useRef(Promise.resolve());
 
-  // `onError(err)` opcional: si el guardado en Supabase falla, en vez del toast
-  // genérico se llama a este callback (lo usa Marcación para dejar la marca en
-  // una cola local del teléfono y reintentarla al reconectar). En ambos casos
-  // se recarga para revertir el cambio optimista que no se pudo persistir.
-  const set = useCallback((fn, onError) => {
-    setDbState(prev => {
-      const base = prev || dbRef.current;
-      if (!base) return prev;
-      const next = typeof fn === 'function' ? fn(base) : fn;
-      dbRef.current = next;
-      genRef.current++;
-      syncQueueRef.current = syncQueueRef.current.then(() => syncChanges(base, next)).catch(err => {
+  // Aviso persistente de "no se pudo guardar", con reintento. Ver encolarSync.
+  const [errorSync, setErrorSync] = useState(null);
+  // Cuántos cambios quedaron sin guardar. Hace falta porque después de un fallo
+  // la persona sigue trabajando y esos guardados posteriores sí pueden ir bien:
+  // el aviso no se puede quitar solo porque el último haya funcionado, mientras
+  // siga habiendo un cambio anterior que nunca llegó a la base.
+  const fallosRef = useRef(0);
+
+  const encolarSync = useCallback((base, next, onError) => {
+    syncQueueRef.current = syncQueueRef.current
+      .then(() => syncChanges(base, next))
+      .then(() => { if (fallosRef.current === 0) setErrorSync(null); })
+      .catch(err => {
         console.error(err);
-        if (onError) onError(err);
-        else toastRef.current?.('No se pudo guardar en la base de datos: ' + err.message, 'rose');
-        recargar(); // revierte cualquier cambio optimista que no se haya podido guardar
+        // El módulo que llamó puede hacerse cargo (Marcación encola la marca en
+        // el teléfono); ahí sí se recarga, porque ya guardó una copia aparte.
+        if (onError) { onError(err); recargar(); return; }
+        // Sin manejador propio NO se recarga. Recargar descartaba de la
+        // pantalla todo lo que la persona llevaba editado y aún sin guardar
+        // —así se vivía el "tenía todo diligenciado y se borró"—. Ahora el
+        // trabajo se conserva en pantalla y se avisa de forma persistente,
+        // con la opción de reintentar el guardado.
+        fallosRef.current++;
+        setErrorSync({
+          mensaje: err.message || 'Error desconocido',
+          sinPermiso: err.code === 'SIN_PERMISO',
+          reintentar: () => {
+            fallosRef.current = Math.max(0, fallosRef.current - 1);
+            setErrorSync(null);
+            encolarSync(base, next);
+          },
+          descartar: () => { fallosRef.current = 0; setErrorSync(null); recargar(); }
+        });
       });
-      return next;
-    });
   }, [recargar]);
 
-  return { db, set, loading, refrescar: recargar };
+  // `onError(err)` opcional: si el guardado en Supabase falla, en vez del aviso
+  // persistente se llama a este callback (lo usa Marcación para dejar la marca
+  // en una cola local del teléfono y reintentarla al reconectar).
+  //
+  // El cálculo se hace FUERA del updater de setDbState: React puede invocar un
+  // updater más de una vez, y aquí dentro había efectos secundarios (mutar
+  // dbRef/genRef y encolar la sincronización) que entonces se duplicaban.
+  const set = useCallback((fn, onError) => {
+    const base = dbRef.current;
+    if (!base) return;
+    const next = typeof fn === 'function' ? fn(base) : fn;
+    dbRef.current = next;
+    genRef.current++;
+    setDbState(next);
+    encolarSync(base, next, onError);
+  }, [encolarSync]);
+
+  return { db, set, loading, refrescar: recargar, errorSync };
 }

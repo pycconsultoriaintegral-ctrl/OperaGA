@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Icon, Avatar, useToast } from './components/ui.jsx';
+import { Icon, Avatar, Btn, useToast } from './components/ui.jsx';
 import { useRemoteDB } from './data/useRemoteDB.js';
 import { calcularCompensatorios } from './lib/payroll.js';
 import { fmtFechaLarga, hoy } from './lib/utils.js';
@@ -72,7 +72,7 @@ function AppShell({ perfil, rol, has, onLogout, userId }){
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();
-  const { db, set, loading: dbLoading, refrescar } = useRemoteDB(toast, userId);
+  const { db, set, loading: dbLoading, refrescar, errorSync } = useRemoteDB(toast, userId);
 
   useEffect(()=>{ document.documentElement.classList.toggle('dark',dark);
     try{localStorage.setItem('opera_dark',dark?'1':'0');}catch(e){} },[dark]);
@@ -99,7 +99,9 @@ function AppShell({ perfil, rol, has, onLogout, userId }){
     if (!db) return {};
     return {
       novedades: db.novedades.filter(n=>n.estado==='PENDIENTE').length,
-      marcacion: db.asistencia.filter(r=>r.validacion && !['OK','MANUAL'].includes(r.validacion)).length,
+      // IP_DISTINTA no cuenta como inconsistencia (ver lib/geo.js): marcar con
+      // datos móviles siempre da una IP distinta a la del internet del sitio.
+      marcacion: db.asistencia.filter(r=>r.validacion && !['OK','MANUAL','IP_DISTINTA'].includes(r.validacion)).length,
       enreserva: db.estadias.filter(e=>e.estado==='ACTIVA').length,
       horarios: calcularCompensatorios(db.empleados.filter(e=>e.estado==='ACTIVO'),
         db.horarios||[], db.asistencia, db.novedades, db.festivos, db.cfg)
@@ -203,6 +205,27 @@ function AppShell({ perfil, rol, has, onLogout, userId }){
         </div>
       </header>
 
+      {/* Aviso persistente de cambios sin guardar. Antes un fallo de guardado
+          solo mostraba un toast que se iba solo y además recargaba, borrando de
+          la pantalla todo el trabajo no sincronizado. Ahora el trabajo se queda
+          en pantalla y este aviso no desaparece hasta reintentar o descartar. */}
+      {errorSync && <div className="mx-4 sm:mx-6 mt-4 p-4 rounded-xl bg-rose-50 dark:bg-rose-500/10
+        ring-1 ring-inset ring-rose-500/30 flex flex-wrap items-start gap-3">
+        <Icon n="alert" c="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5"/>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-extrabold text-rose-900 dark:text-rose-200">
+            Tus últimos cambios NO se guardaron</p>
+          <p className="text-xs text-rose-800 dark:text-rose-300 mt-1 leading-relaxed">{errorSync.mensaje}</p>
+          <p className="text-[11px] text-rose-700/80 dark:text-rose-400/80 mt-1.5">
+            Lo que ves en pantalla sigue como lo dejaste, pero todavía no está en la base de datos.
+            {errorSync.sinPermiso ? ' Es un problema de permisos del rol, reintentar no lo va a resolver.' : ' Puedes reintentar el guardado.'}
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <Btn s="sm" onClick={errorSync.reintentar} icon="check">Reintentar</Btn>
+          <Btn s="sm" v="outline" onClick={errorSync.descartar}>Descartar cambios</Btn>
+        </div>
+      </div>}
       <main className="flex-1 p-4 sm:p-6 max-w-[1600px] w-full">{VISTAS[vista]}</main>
 
       <footer className="px-6 py-4 border-t border-ink-200 dark:border-ink-800 text-[11px] text-ink-400 flex flex-wrap justify-between gap-2">
