@@ -41,6 +41,12 @@ export default function Horarios({db, set, toast, perfil, has}){
   // el unique (empleado_id, fecha) — el error "horarios_empleado_id_fecha_key".
   const asignar=(eid,f)=>{
     const ex=progDe(eid,f);
+    // Quitar un turno es un DELETE, y RLS lo anula en silencio si el rol no
+    // tiene 'eliminar' sobre horarios. Se avisa aquí en vez de dejar que el
+    // guardado falle después (ver migración 0010_supervisor_gestiona_turnos).
+    if(ex && ex.tur===pincel && has && !has('horarios','eliminar'))
+      return toast('Tu rol no puede quitar turnos. Pide a un administrador que active «Eliminar» '
+        + 'en el módulo Horarios (Configuración → Permisos).','rose');
     set(d=>{
       if(ex&&ex.tur===pincel)  // mismo turno de nuevo: quitarlo
         return {...d,horarios:(d.horarios||[]).filter(h=>!(h.emp===eid&&h.fecha===f))};
