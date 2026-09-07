@@ -224,6 +224,85 @@ export function evaluarEstadia(estadia, registros, cfg, festivos){
    ══════════════════════════════════════════════════════════════════════════ */
 
 /** Compara la programación del supervisor con la marcación real */
+/* ══════════════════════════════════════════════════════════════════════════
+   IMPUTACIÓN DE TIEMPO POR ESTADÍA  ·  reserva → estadía → nómina
+   ══════════════════════════════════════════════════════════════════════════
+   Una reserva aloja a un mayordomo en la propiedad durante unos días. Hasta
+   ahora ese tiempo solo se pagaba si él lo marcaba en el kiosco: si la
+   marcación fallaba (sin señal, celular sin GPS, permiso mal configurado),
+   el día trabajado simplemente no entraba a la liquidación.
+
+   `imputarEstadias` rellena SOLO los días de estadía en los que no hay
+   ninguna marcación, con la jornada ordinaria del interno (8 h efectivas,
+   o cfg.horasDiarias). No inventa disponibilidad: el tiempo de
+   disponibilidad restringida debe estar pactado por escrito y se sigue
+   pagando únicamente cuando se marca de verdad.
+
+   Los registros que devuelve NO se guardan en la base: se calculan al vuelo
+   para liquidar y van marcados con `imputado:true` para que la liquidación
+   los pueda mostrar aparte y auditar de dónde salió cada hora.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Días (YYYY-MM-DD) de una estadía que caen dentro de [desde, hasta]. */
+function diasDeEstadia(estadia, desde, hasta){
+  const ini = estadia.desde > desde ? estadia.desde : desde;
+  const fin = estadia.hasta < hasta ? estadia.hasta : hasta;
+  const n = diffDias(ini, fin) + 1;
+  if(n <= 0) return [];
+  return Array.from({length:n}, (_,i) => addDias(ini, i));
+}
+
+/**
+ * Registros de asistencia imputados para un empleado en un período.
+ *
+ * @param estadias   todas las estadías (se usan las ACTIVA y FINALIZADA)
+ * @param asistencia marcaciones reales del empleado
+ * @param empId      empleado a liquidar
+ * @param desde/hasta período de liquidación
+ * @param cfg        configuración (horasDiarias)
+ * @param tope       fecha máxima a imputar (por defecto `hasta`): nunca se
+ *                   imputan días futuros de una estadía todavía en curso
+ * @returns { registros[], dias[], porEstadia{} }
+ */
+export function imputarEstadias(estadias, asistencia, empId, desde, hasta, cfg, tope){
+  const limite = tope && tope < hasta ? tope : hasta;
+  // Fechas en las que el empleado SÍ marcó algo: esas se respetan tal cual,
+  // no se completan ni se corrigen — lo marcado manda sobre lo imputado.
+  const marcadas = new Set(
+    asistencia.filter(r => r.empleado === empId).map(r => r.fecha));
+
+  // Jornada ordinaria DIURNA. Empieza a las 08:00 a propósito: la franja
+  // nocturna va de cfg.nocturnoInicio (19:00) a cfg.nocturnoFin (06:00), así
+  // que imputar desde medianoche habría metido 6 horas de recargo nocturno que
+  // nadie trabajó. Con 08:00 + 8 h se cierra a las 16:00, íntegramente diurno.
+  const horas = Math.min(cfg.horasDiarias || 8, 12);
+  const iniMin = 8 * 60;
+  const finMin = iniMin + Math.round(horas * 60);
+  const hhmm = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  const entrada = hhmm(iniMin), fin = hhmm(finMin);
+
+  const registros = [], dias = [], porEstadia = {};
+  estadias
+    .filter(e => e.empleado === empId && ['ACTIVA','FINALIZADA'].includes(e.estado))
+    .forEach(e => {
+      diasDeEstadia(e, desde, limite).forEach(f => {
+        if(marcadas.has(f)) return;          // ya hay marcación real ese día
+        if(dias.includes(f)) return;         // dos estadías solapadas: no duplicar
+        dias.push(f);
+        (porEstadia[e.id] = porEstadia[e.id] || []).push(f);
+        registros.push({
+          id: `imputado-${e.id}-${f}`, empleado: empId, propiedad: e.propiedad,
+          fecha: f, tipo: 'EFECTIVO', entrada, salida: fin,
+          metodo: 'IMPUTADO', validacion: 'IMPUTADO', imputado: true, estadia: e.id,
+          obs: 'Jornada imputada por estadía en la propiedad (sin marcación registrada)'
+        });
+      });
+    });
+
+  dias.sort();
+  return { registros, dias, porEstadia };
+}
+
 export function compararProgramado(horarios, asistencia, turnos, cfg, empIdx){
   const tur={}; turnos.forEach(t=>tur[t.id]=t);
   // De la asistencia solo interesa el tiempo efectivo para medir cumplimiento
