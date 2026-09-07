@@ -225,8 +225,11 @@ export default function Marcacion({db, set, toast, perfil, has}){
   }, [db.asistencia]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Marcaciones con inconsistencia ──
+  // IP_DISTINTA ya no se genera (ver lib/geo.js) pero sigue habiendo registros
+  // históricos con ese estado: se excluyen para que el listado vuelva a mostrar
+  // solo lo que de verdad hay que revisar.
   const inconsistentes = db.asistencia
-    .filter(r => r.validacion && !['OK','MANUAL'].includes(r.validacion))
+    .filter(r => r.validacion && !['OK','MANUAL','IP_DISTINTA'].includes(r.validacion))
     .sort((a,b)=>b.fecha.localeCompare(a.fecha));
 
   return <Page title="Marcación" sub="Registro de asistencia con validación de ubicación"

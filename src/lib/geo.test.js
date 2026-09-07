@@ -42,10 +42,15 @@ describe('validarMarcacion', () => {
     expect(r.distancia).toBeGreaterThan(cfg.radioGeocerca);
   });
 
-  it('nunca bloquea por una IP distinta a la registrada, solo advierte', () => {
+  it('una IP distinta a la registrada no cambia el estado ni bloquea, solo deja aviso', () => {
+    // Marcar con datos móviles SIEMPRE da una IP distinta a la del internet de
+    // la propiedad (CGNAT del operador). Si eso cambiara el estado, cada
+    // marcación válida hecha desde el celular entraría en "Inconsistencias".
     const r = validarMarcacion({ lat:10.4712, lng:-75.4890, codigo:'VMB-01', ip:'9.9.9.9', foto:null }, propiedad, cfg);
-    expect(r.estado).toBe('IP_DISTINTA');
+    expect(r.estado).toBe('OK');
     expect(r.bloqueante).toBe(false);
+    expect(r.ipDistinta).toBe(true);
+    expect(r.avisos.length).toBe(1);
   });
 
   it('devuelve MANUAL cuando no hay propiedad asociada', () => {

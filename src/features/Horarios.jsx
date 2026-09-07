@@ -41,6 +41,12 @@ export default function Horarios({db, set, toast, perfil, has}){
   // el unique (empleado_id, fecha) — el error "horarios_empleado_id_fecha_key".
   const asignar=(eid,f)=>{
     const ex=progDe(eid,f);
+    // Quitar un turno es un DELETE, y RLS lo anula en silencio si el rol no
+    // tiene 'eliminar' sobre horarios. Se avisa aquí en vez de dejar que el
+    // guardado falle después (ver migración 0010_supervisor_gestiona_turnos).
+    if(ex && ex.tur===pincel && has && !has('horarios','eliminar'))
+      return toast('Tu rol no puede quitar turnos. Pide a un administrador que active «Eliminar» '
+        + 'en el módulo Horarios (Configuración → Permisos).','rose');
     set(d=>{
       if(ex&&ex.tur===pincel)  // mismo turno de nuevo: quitarlo
         return {...d,horarios:(d.horarios||[]).filter(h=>!(h.emp===eid&&h.fecha===f))};
@@ -62,13 +68,20 @@ export default function Horarios({db, set, toast, perfil, has}){
   const copiarSemana=()=>{
     const dest=Array.from({length:7},(_,i)=>addDias(ini,7+i));
     set(d=>{
-      const existentes={};
-      (d.horarios||[]).forEach(h=>{ if(dest.includes(h.fecha)) existentes[h.emp+'|'+h.fecha]=h; });
-      const otros=(d.horarios||[]).filter(h=>!dest.includes(h.fecha));
+      const todos=d.horarios||[];
+      const porClave={};
+      todos.forEach(h=>{ if(dest.includes(h.fecha)) porClave[h.emp+'|'+h.fecha]=h; });
+      const sobrescritas=new Set();
       const nuevos=[];
-      dias.forEach((f,i)=>(d.horarios||[]).filter(h=>h.fecha===f)
-        .forEach(h=>{ const key=h.emp+'|'+dest[i]; const ex=existentes[key];
-          nuevos.push(ex?{...ex,tur:h.tur}:{id:uid(),emp:h.emp,fecha:dest[i],tur:h.tur}); }));
+      dias.forEach((f,i)=>todos.filter(h=>h.fecha===f).forEach(h=>{
+        const key=h.emp+'|'+dest[i]; sobrescritas.add(key);
+        const ex=porClave[key];
+        nuevos.push(ex?{...ex,tur:h.tur}:{id:uid(),emp:h.emp,fecha:dest[i],tur:h.tur}); }));
+      // Conservar lo que ya estaba en la semana destino y que la de origen no
+      // sobrescribe. Antes se descartaba toda la semana destino y solo se
+      // reponía lo que tuviera contraparte en el origen: a quien no tenía nada
+      // programado esa semana de origen se le borraba el turno del destino.
+      const otros=todos.filter(h=>!dest.includes(h.fecha) || !sobrescritas.has(h.emp+'|'+h.fecha));
       return {...d,horarios:[...otros,...nuevos]};
     });
     toast('Semana copiada a la siguiente');
