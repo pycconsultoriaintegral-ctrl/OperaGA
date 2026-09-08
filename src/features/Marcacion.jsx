@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Page, Card, Tabs, Field, Select, Input, Btn, Modal, Table, Td, Badge, Avatar, Empty, Icon, TONE, Bar, exportCSV } from '../components/ui.jsx';
 import { TIPOS_TIEMPO, METODOS, VALIDACION } from '../lib/constants.js';
-import { uid, pad, fmtFecha, hoy } from '../lib/utils.js';
+import { uid, pad, fmtFecha, hoy , ahoraLocal } from '../lib/utils.js';
 import { validarMarcacion, distanciaMt } from '../lib/geo.js';
 import { leerPendientes, agregarPendiente, depurarPendientes } from '../lib/marcacionesPendientes.js';
 
@@ -179,7 +179,7 @@ export default function Marcacion({db, set, toast, perfil, has}){
       asistencia: abierta
         ? d.asistencia.map(r => r.id===abierta.id ? { ...r, salida:hm, metodo, foto: foto||r.foto } : r)
         : [...d.asistencia, nueva],
-      auditoria: [{ id:uid(), fecha:new Date().toISOString().slice(0,16).replace('T',' '),
+      auditoria: [{ id:uid(), fecha: ahoraLocal(),
         usuario: empleado?.nombre || '—', accion: abierta?'MARCAR_SALIDA':'MARCAR_ENTRADA',
         entidad:`Asistencia ${propiedad?.nombre}`,
         detalle:`${TIPOS_TIEMPO[tipo].label} · ${abierta?'Salida':'Entrada'} ${hm} · ${VALIDACION[validacion?.estado||'MANUAL'].label}` }, ...d.auditoria]

@@ -176,6 +176,11 @@ async function syncChanges(prevDb, nextDb){
 export function useRemoteDB(toast, userId){
   const [db, setDbState] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Para que la persona VEA si la app está recibiendo cambios en vivo y de
+  // cuándo son los datos que tiene delante, en vez de mirar una pantalla
+  // desactualizada creyendo que está al día.
+  const [ultimaCarga, setUltimaCarga] = useState(null);
+  const [enVivo, setEnVivo] = useState(false);
   const dbRef = useRef(null);
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -211,6 +216,7 @@ export function useRemoteDB(toast, userId){
         if (genRef.current !== startGen) return; // hubo una edición local durante el fetch: descartar esta foto vieja
         dbRef.current = fresh;
         setDbState(fresh);
+        setUltimaCarga(Date.now());
       } catch (err) {
         console.error(err);
         toastRef.current?.('No se pudo cargar la información: ' + err.message, 'rose');
@@ -226,6 +232,18 @@ export function useRemoteDB(toast, userId){
     const tablasRealtime = [...TABLAS_SYNCABLES.map(k => TABLAS[k].table), 'festivos', 'configuracion', 'cargos'];
     let timeoutId = null;
     const debounceRecargar = () => { clearTimeout(timeoutId); timeoutId = setTimeout(recargar, 400); };
+
+    // Refrescar al volver a la pestaña y cada minuto mientras esté visible.
+    // Realtime NO se puede dar por garantizado: el websocket se cae al
+    // suspender el portátil o perder la red, la tabla puede no estar en la
+    // publicación `supabase_realtime`, y RLS filtra los eventos. Si eso falla
+    // en silencio, quien deja la pestaña abierta nunca ve lo que otro guardó
+    // —justo el "Mauricio creó los horarios y a mí no se me reflejan"—.
+    // Estas dos redes de seguridad hacen que la información llegue igual.
+    const alVolver = () => { if (document.visibilityState === 'visible') recargar(); };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    const intervalo = setInterval(alVolver, 60000);
 
     // Encolar los recargar() (arriba) evita que se resuelvan fuera de orden
     // entre sí, pero no evita el caso más común: esta MISMA sesión recibe el
@@ -250,9 +268,25 @@ export function useRemoteDB(toast, userId){
         debounceRecargar();
       });
     });
-    channel.subscribe();
+    // `subscribe()` iba sin callback: si el canal fallaba (tabla fuera de la
+    // publicación, token vencido, websocket caído) nadie se enteraba y las
+    // actualizaciones en vivo se morían para siempre, en silencio. Ahora se
+    // registra el estado —para poder mostrarlo en pantalla— y al reconectar
+    // se recarga, porque durante la caída pudo cambiar cualquier cosa.
+    channel.subscribe(status => {
+      const vivo = status === 'SUBSCRIBED';
+      setEnVivo(vivo);
+      if (vivo) recargar();
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('Realtime:', status);
+    });
 
-    return () => { clearTimeout(timeoutId); supabase.removeChannel(channel); };
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+      supabase.removeChannel(channel);
+    };
   }, [recargar]);
 
   // Cola de sincronizaciones: dos `set()` seguidos (doble clic, clics rápidos
@@ -317,5 +351,5 @@ export function useRemoteDB(toast, userId){
     encolarSync(base, next, onError);
   }, [encolarSync]);
 
-  return { db, set, loading, refrescar: recargar, errorSync };
+  return { db, set, loading, refrescar: recargar, errorSync, ultimaCarga, enVivo };
 }

@@ -9,7 +9,19 @@ export const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
   : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = Math.random()*16|0, v = c==='x' ? r : (r&0x3|0x8); return v.toString(16); });
 export const pad = n => String(n).padStart(2,'0');
-export const hoy = () => new Date().toISOString().slice(0,10);
+// FECHA LOCAL, no UTC. toISOString() devuelve la fecha en UTC: en Colombia
+// (UTC-5) a partir de las 19:00 ya reporta el día siguiente. Con eso, quien
+// marcaba entrada a las 7 de la noche —o el turno nocturno, que empieza a las
+// 22:00— quedaba archivado con la fecha de mañana, y a quien miraba "hoy" en
+// Asistencia sencillamente no le aparecía. Lo mismo corría las semanas de
+// Horarios y los períodos de Liquidación.
+// addDias/diffDias/nombreDia sí estaban bien: anclan a las 12:00 locales.
+export const hoy = () => { const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+
+/** Fecha y hora locales "YYYY-MM-DD HH:MM", para los registros de auditoría. */
+export const ahoraLocal = () => { const d = new Date();
+  return `${hoy()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
 export const fmtCOP = v => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(Math.round(v||0));
 export const fmtNum = (v,d=1) => (v||0).toLocaleString('es-CO',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -18,7 +30,8 @@ export const fmtFechaLarga = f => { if(!f) return '—'; const dt=new Date(f+'T1
   return dt.toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); };
 
 export const diffDias = (a,b) => Math.round((new Date(b+'T12:00:00') - new Date(a+'T12:00:00'))/86400000);
-export const addDias = (f,n) => { const d=new Date(f+'T12:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+export const addDias = (f,n) => { const d=new Date(f+'T12:00:00'); d.setDate(d.getDate()+n);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
 export const nombreDia = f => ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][new Date(f+'T12:00:00').getDay()];
 export const esDomingo = f => new Date(f+'T12:00:00').getDay() === 0;
 

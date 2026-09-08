@@ -72,7 +72,7 @@ function AppShell({ perfil, rol, has, onLogout, userId }){
   const [dark,setDark]   = useState(()=>{ try{return localStorage.getItem('opera_dark')==='1';}catch(e){return false;} });
   const [menu,setMenu]   = useState(false);
   const [toast,toastNode] = useToast();
-  const { db, set, loading: dbLoading, refrescar, errorSync } = useRemoteDB(toast, userId);
+  const { db, set, loading: dbLoading, refrescar, errorSync, ultimaCarga, enVivo } = useRemoteDB(toast, userId);
 
   useEffect(()=>{ document.documentElement.classList.toggle('dark',dark);
     try{localStorage.setItem('opera_dark',dark?'1':'0');}catch(e){} },[dark]);
@@ -194,6 +194,19 @@ function AppShell({ perfil, rol, has, onLogout, userId }){
             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-ink-100 dark:bg-ink-800">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/>
               <span className="text-[11px] font-bold text-ink-600 dark:text-ink-300">{fmtFechaLarga(hoy())}</span></div>
+            {/* Estado de los datos: si la app está recibiendo cambios en vivo y
+                de cuándo es lo que hay en pantalla. Sin esto era imposible saber
+                si "no me aparece" era un dato que no existe o una pantalla
+                desactualizada. El botón fuerza la recarga. */}
+            <button onClick={()=>refrescar()} title={enVivo
+                ? 'Conectado en vivo. Clic para actualizar ahora.'
+                : 'SIN conexión en vivo: los cambios de otras personas pueden tardar. Clic para actualizar ahora.'}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800">
+              <span className={`w-1.5 h-1.5 rounded-full ${enVivo?'bg-emerald-500':'bg-amber-500'}`}/>
+              <span className="text-[11px] font-bold hidden sm:inline">
+                {ultimaCarga ? new Date(ultimaCarga).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}) : '—'}</span>
+              <Icon n="refresh" c="w-4 h-4"/>
+            </button>
             {badges.novedades>0 && <button onClick={()=>go('novedades')} title="Novedades pendientes"
               className="relative p-2 rounded-lg text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800">
               <Icon n="bell" c="w-5 h-5"/>
