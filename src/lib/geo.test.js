@@ -81,4 +81,37 @@ describe('validarMarcacion', () => {
     expect(r.estado).toBe('FUERA_ZONA');
     expect(r.bloqueante).toBe(true);
   });
+
+  it("SIN código NO bloquea: se registra para revisión (antes dejaba al trabajador sin marcar)", () => {
+    // Quien abre la app directo, sin escanear el QR, no lleva código. Con GPS
+    // dentro de la geocerca hay evidencia suficiente para registrar la jornada.
+    const r = validarMarcacion({ lat:10.4712, lng:-75.4890, precision:14, codigo:"", ip:null, foto:null }, propiedad, cfg);
+    expect(r.bloqueante).toBe(false);
+    expect(r.estado).toBe("SIN_CODIGO");
+    expect(r.avisos.some(a => a.includes("QR"))).toBe(true);
+  });
+
+  it("un código EQUIVOCADO sí sigue bloqueando", () => {
+    const r = validarMarcacion({ lat:10.4712, lng:-75.4890, codigo:"OTRO-99", ip:null, foto:null }, propiedad, cfg);
+    expect(r.estado).toBe("CODIGO_MAL");
+    expect(r.bloqueante).toBe(true);
+  });
+
+  it("sin código y además fuera de la zona, manda el bloqueo por geocerca", () => {
+    const r = validarMarcacion({ lat:10.60, lng:-75.60, precision:20, codigo:"", ip:null, foto:null }, propiedad, cfg);
+    expect(r.estado).toBe("FUERA_ZONA");
+    expect(r.bloqueante).toBe(true);
+  });
+
+  it("sin código y sin GPS se registra igual, señalado, sin bloquear", () => {
+    const r = validarMarcacion({ lat:null, lng:null, codigo:"", ip:null, foto:null }, propiedad, cfg);
+    expect(r.bloqueante).toBe(false);
+    expect(r.estado).toBe("SIN_GPS");
+  });
+
+  it("con el código correcto y dentro de la zona, sigue dando OK", () => {
+    const r = validarMarcacion({ lat:10.4712, lng:-75.4890, codigo:"vmb-01", ip:null, foto:null }, propiedad, cfg);
+    expect(r.estado).toBe("OK");
+    expect(r.bloqueante).toBe(false);
+  });
 });

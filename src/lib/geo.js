@@ -21,12 +21,22 @@ export function validarMarcacion({lat, lng, precision, codigo, ip, foto}, propie
   if(!propiedad){ r.estado='MANUAL'; return r; }
 
   // 1. Código de propiedad (proviene del QR fijo o se digita)
+  //
+  // Se distingue entre NO dar código y dar uno EQUIVOCADO, que son cosas muy
+  // distintas. Antes las dos bloqueaban por igual, y como quien abre la app
+  // directo (sin escanear el QR) no lleva código, el trabajador se quedaba sin
+  // poder marcar aunque el GPS lo situara dentro de la propiedad y la IP
+  // coincidiera con la registrada. Perder el registro de una jornada real es
+  // peor que registrarla señalada para revisión.
+  //   · código equivocado  → bloquea (o está en otra propiedad, o lo digitó mal)
+  //   · sin código         → no bloquea; se evalúa la geocerca y queda marcada
+  let faltaCodigo = false;
   if(cfg.exigirCodigo && propiedad.codigo){
-    if(!codigo){ r.estado='CODIGO_MAL'; r.bloqueante=true;
-      r.avisos.push('No se suministró el código de la propiedad.'); return r; }
-    if(codigo.trim().toUpperCase() !== propiedad.codigo){
-      r.estado='CODIGO_MAL'; r.bloqueante=true;
-      r.avisos.push(`El código "${codigo}" no corresponde a ${propiedad.nombre}.`); return r; }
+    if(codigo){
+      if(codigo.trim().toUpperCase() !== propiedad.codigo){
+        r.estado='CODIGO_MAL'; r.bloqueante=true;
+        r.avisos.push(`El código "${codigo}" no corresponde a ${propiedad.nombre}.`); return r; }
+    } else faltaCodigo = true;   // se resuelve abajo, ya con la geocerca evaluada
   }
 
   // 2. Geocerca (control primario)
@@ -61,6 +71,15 @@ export function validarMarcacion({lat, lng, precision, codigo, ip, foto}, propie
   } else if(cfg.exigirGPS){
     r.estado='SIN_GPS';
     r.avisos.push('No se obtuvo la ubicación del dispositivo. Se registra, pero queda marcada para revisión.');
+  }
+
+  // 2-bis. Falta de código: nunca bloquea, pero deja la marcación señalada.
+  // Si la geocerca ya confirmó que está en el sitio, el QR era el segundo
+  // factor y su ausencia es una observación, no un motivo para no registrar.
+  if(faltaCodigo){
+    if(r.estado === 'OK') r.estado = 'SIN_CODIGO';
+    r.avisos.push('No se escaneó el QR de la propiedad ni se digitó su código. '
+      + 'Se registra y queda marcada para revisión.');
   }
 
   // 3. IP: SOLO informativa. No bloquea y tampoco cambia el estado.
