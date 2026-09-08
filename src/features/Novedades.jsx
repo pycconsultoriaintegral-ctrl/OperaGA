@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Page, Card, Table, Td, Badge, Avatar, Btn, Modal, Field, Input, Select, Area, Empty, Icon, IN, DOT, exportCSV } from '../components/ui.jsx';
 import { TIPOS_NOVEDAD } from '../lib/constants.js';
-import { uid, hoy, diffDias, fmtFecha } from '../lib/utils.js';
+import { uid, hoy, diffDias, fmtFecha , ahoraLocal } from '../lib/utils.js';
 
 export default function Novedades({db, set, toast, has}){
   const [ft,setFt] = useState(''); const [fe,setFe] = useState('');
@@ -26,7 +26,7 @@ export default function Novedades({db, set, toast, has}){
 
   const cambiarEstado = (n,estado) => {
     set(d=>({...d, novedades: d.novedades.map(x=>x.id===n.id?{...x,estado}:x),
-      auditoria:[{id:uid(),fecha:new Date().toISOString().slice(0,16).replace('T',' '),
+      auditoria:[{id:uid(),fecha: ahoraLocal(),
         usuario:'PYC Consultoria Integral SAS', accion: estado==='APROBADA'?'APROBAR':'RECHAZAR',
         entidad:`Novedad ${n.id}`, detalle:`${TIPOS_NOVEDAD[n.tipo].label} — ${empleados.find(e=>e.id===n.empleado)?.nombre}`},...d.auditoria]}));
     toast(estado==='APROBADA'?'Novedad aprobada':'Novedad rechazada', estado==='APROBADA'?'emerald':'rose');
