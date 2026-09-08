@@ -101,6 +101,7 @@ export const VALIDACION = {
   SIN_GPS:      { label:'Sin ubicación',         color:'amber'   },
   GPS_IMPRECISO:{ label:'Ubicación imprecisa',   color:'amber'   },
   IP_DISTINTA:  { label:'Red no reconocida',     color:'amber'   },
+  SIN_CODIGO:   { label:'Sin código QR',         color:'amber'   },
   CODIGO_MAL:   { label:'Código incorrecto',     color:'rose'    },
   MANUAL:       { label:'Registro manual',       color:'slate'   }
 };

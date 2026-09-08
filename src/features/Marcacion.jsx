@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Page, Card, Tabs, Field, Select, Input, Btn, Modal, Table, Td, Badge, Avatar, Empty, Icon, TONE, Bar, exportCSV } from '../components/ui.jsx';
 import { TIPOS_TIEMPO, METODOS, VALIDACION } from '../lib/constants.js';
 import { uid, pad, fmtFecha, hoy , ahoraLocal } from '../lib/utils.js';
@@ -195,34 +195,45 @@ export default function Marcacion({db, set, toast, perfil, has}){
   // reinicia el contador de intentos para volver a probar en firme. Tras 5
   // intentos seguidos sin `online` de por medio, deja de insistir y avisa una
   // sola vez, pero la marca no se borra: sigue en el teléfono.
-  useEffect(() => {
-    const sincronizar = ({ reintentar = false } = {}) => {
-      let vivos = depurarPendientes(db.asistencia);
-      if(reintentar){
-        vivos = vivos.map(r => ({ ...r, _intentos:0, _avisado:false }));
-        vivos.forEach(agregarPendiente);
+  // `reintentar` reinicia el contador: lo usa el evento `online` y el botón
+  // manual. Hace falta el botón porque tras 5 intentos fallidos la cola se
+  // detiene, y si la causa se arregla del lado del servidor (por ejemplo, se
+  // vincula la cuenta con su ficha de empleado) el teléfono no tiene forma de
+  // enterarse — sin un reintento a mano esas marcaciones quedarían atascadas.
+  const enviarPendientes = useCallback(({ reintentar = false } = {}) => {
+    let vivos = depurarPendientes(db.asistencia);
+    if(reintentar){
+      vivos = vivos.map(r => ({ ...r, _intentos:0, _avisado:false }));
+      vivos.forEach(agregarPendiente);
+    }
+    setPendientes(vivos);
+    if(!vivos.length){ if(reintentar) toast('No hay marcaciones pendientes'); return; }
+    if(!navigator.onLine){
+      if(reintentar) toast('Sin conexión. Se enviarán solas al recuperar señal.','amber');
+      return;
+    }
+    if(reintentar) toast(`Reenviando ${vivos.length} marcación(es)…`);
+    vivos.forEach(row => {
+      if((row._intentos||0) >= 5){
+        if(!row._avisado){ agregarPendiente({ ...row, _avisado:true });
+          toast('Una marcación no se pudo enviar tras varios intentos. Usa "Reintentar" o avisa a administración.','rose'); }
+        return;
       }
-      setPendientes(vivos);
-      if(!navigator.onLine) return;
-      vivos.forEach(row => {
-        if((row._intentos||0) >= 5){
-          if(!row._avisado){ agregarPendiente({ ...row, _avisado:true });
-            toast('Una marcación no se pudo enviar tras varios intentos. Avisa a administración.','rose'); }
-          return;
-        }
-        const { _intentos, _ts, _avisado, ...limpia } = row;
-        agregarPendiente({ ...limpia, _intentos:(row._intentos||0)+1 });
-        set(d => d.asistencia.some(r => r.id===limpia.id) ? d
-              : ({ ...d, asistencia:[...d.asistencia, limpia] }),
-          // si el reintento también falla, se vuelve a dejar en la cola
-          () => { agregarPendiente({ ...limpia, _intentos:(row._intentos||0)+1 }); setPendientes(leerPendientes()); });
-      });
-    };
-    const alReconectar = () => sincronizar({ reintentar:true });
-    sincronizar();
+      const { _intentos, _ts, _avisado, ...limpia } = row;
+      agregarPendiente({ ...limpia, _intentos:(row._intentos||0)+1 });
+      set(d => d.asistencia.some(r => r.id===limpia.id) ? d
+            : ({ ...d, asistencia:[...d.asistencia, limpia] }),
+        // si el reintento también falla, se vuelve a dejar en la cola
+        () => { agregarPendiente({ ...limpia, _intentos:(row._intentos||0)+1 }); setPendientes(leerPendientes()); });
+    });
+  }, [db.asistencia, set, toast]);
+
+  useEffect(() => {
+    enviarPendientes();
+    const alReconectar = () => enviarPendientes({ reintentar:true });
     window.addEventListener('online', alReconectar);
     return () => window.removeEventListener('online', alReconectar);
-  }, [db.asistencia]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enviarPendientes]);
 
   // ── Marcaciones con inconsistencia ──
   // IP_DISTINTA ya no se genera (ver lib/geo.js) pero sigue habiendo registros
@@ -268,7 +279,7 @@ export default function Marcacion({db, set, toast, perfil, has}){
             <Select value={tipo} onChange={e=>setTipo(e.target.value)}
               options={Object.values(TIPOS_TIEMPO).map(x=>({v:x.id,l:x.label}))}/></Field></div>
           <div className="sm:col-span-2"><Field label="Código de la propiedad"
-            hint="Se autocompleta al escanear el QR fijo de la propiedad, o se digita">
+            hint="Se autocompleta al escanear el QR fijo de la propiedad. Si no lo escaneaste puedes marcar igual: la marcación queda señalada para revisión">
             <Input value={codigo} onChange={e=>setCodigo(e.target.value.toUpperCase())}
               placeholder={propiedad ? propiedad.codigo.replace(/./g,'•') : 'Ej.: VMB-01'} className="uppercase"/></Field></div>
         </div>
@@ -314,8 +325,11 @@ export default function Marcacion({db, set, toast, perfil, has}){
             ? <>Ya hay una entrada abierta hoy a las <b className="text-ink-800 dark:text-ink-100">{abierta.entrada}</b> — este botón registra la <b>salida</b>.</>
             : <>Este botón registra la <b>entrada</b>. Vuelve a escanear el QR al terminar el turno para registrar la salida.</>}
         </p>}
-        {pendientes.length>0 && <p className="mt-3 text-center text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-          {pendientes.length} marcación{pendientes.length>1?'es':''} guardada{pendientes.length>1?'s':''} en este teléfono, sin enviar todavía. Se reintenta al recuperar señal.</p>}
+        {pendientes.length>0 && <div className="mt-3 flex flex-col items-center gap-1.5">
+          <p className="text-center text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+            {pendientes.length} marcación{pendientes.length>1?'es':''} guardada{pendientes.length>1?'s':''} en este teléfono, sin enviar todavía.</p>
+          <Btn s="sm" v="outline" icon="refresh" onClick={()=>enviarPendientes({reintentar:true})}>Reintentar envío</Btn>
+        </div>}
         <div className="mt-2"><Btn s="lg" className="w-full" icon="check" onClick={registrar}
           disabled={!emp||!prop||validacion?.bloqueante}>{abierta?'Registrar salida':'Registrar entrada'}</Btn></div>
       </Card>
