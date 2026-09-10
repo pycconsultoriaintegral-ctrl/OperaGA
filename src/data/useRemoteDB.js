@@ -9,6 +9,33 @@ const fmtFechaHora = iso => {
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
+/* ──────────────────────────────────────────────────────────────────────────
+   La Data API de Supabase corta toda respuesta en "Max rows" (1000 por
+   defecto) y NO avisa: devuelve las primeras 1000 filas como si fueran todas.
+   `horarios` ya pasa de 4000, así que la app solo veía las más viejas. Las
+   celdas de la semana en curso salían vacías, el supervisor las llenaba, y
+   como la fila sí existía en el servidor el guardado se resolvía como UPDATE
+   (por eso en la auditoría había 26 UPDATE y ningún INSERT). Al recargar
+   volvían a llegar las mismas 1000 viejas y su trabajo "desaparecía" —
+   aunque en la base nunca se borró nada.
+
+   `traerTodo` pide la tabla por páginas con .range() hasta agotarla, y
+   ordena por `id` para que el paginado sea estable entre peticiones.
+   ────────────────────────────────────────────────────────────────────────── */
+const PAGINA = 1000;
+
+export async function traerTodo(tabla, columnas = '*'){
+  const filas = [];
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data, error } = await supabase.from(tabla).select(columnas)
+      .order('id', { ascending: true }).range(desde, desde + PAGINA - 1);
+    if (error) return { data: null, error };
+    filas.push(...(data || []));
+    if (!data || data.length < PAGINA) break;   // última página
+  }
+  return { data: filas, error: null };
+}
+
 /** Trae todas las tablas de Supabase y arma el mismo objeto `db` que ya
  *  consumen los 11 módulos (misma forma que el localStorage del prototipo). */
 async function fetchAll(){
@@ -27,8 +54,10 @@ async function fetchAll(){
     // Vista sin campos sensibles (salario, banco, EPS/AFP/ARL): la usan roles
     // que solo tienen ver=true en 'empleados_publico' (ej. Supervisor), ya que
     // la tabla `empleados` les bloquea todo salvo su propia fila (RLS).
-    supabase.from('empleados_publico').select('*'),
-    ...TABLAS_SYNCABLES.map(key => supabase.from(TABLAS[key].table).select('*'))
+    traerTodo('empleados_publico'),
+    // Paginadas: son las que crecen con la operación. `horarios` ya pasa de
+    // 4000 filas y sin paginar llegaban solo las primeras 1000.
+    ...TABLAS_SYNCABLES.map(key => traerTodo(TABLAS[key].table))
   ]);
 
   for (const res of [cfgRes, festivosRes, profilesRes, auditoriaRes, rolesRes, permisosRes, ...tablaRes]) {
@@ -233,7 +262,7 @@ export function useRemoteDB(toast, userId){
     let timeoutId = null;
     const debounceRecargar = () => { clearTimeout(timeoutId); timeoutId = setTimeout(recargar, 400); };
 
-    // Refrescar al volver a la pestaña y cada minuto mientras esté visible.
+    // Refrescar al volver a la pestaña y cada 3 min mientras esté visible.
     // Realtime NO se puede dar por garantizado: el websocket se cae al
     // suspender el portátil o perder la red, la tabla puede no estar en la
     // publicación `supabase_realtime`, y RLS filtra los eventos. Si eso falla
@@ -243,7 +272,7 @@ export function useRemoteDB(toast, userId){
     const alVolver = () => { if (document.visibilityState === 'visible') recargar(); };
     document.addEventListener('visibilitychange', alVolver);
     window.addEventListener('focus', alVolver);
-    const intervalo = setInterval(alVolver, 60000);
+    const intervalo = setInterval(alVolver, 180000);
 
     // Encolar los recargar() (arriba) evita que se resuelvan fuera de orden
     // entre sí, pero no evita el caso más común: esta MISMA sesión recibe el
